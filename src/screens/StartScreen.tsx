@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Pressable, Animated, StyleSheet } from 'react-native';
+import { View, Text, Pressable, Animated, StyleSheet, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../App';
@@ -9,6 +9,8 @@ import { audioMap } from '@/data/audioMap';
 import { appAudioConfig } from '@/data/config';
 
 export default function StartScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Start'>) {
+  const { width } = Dimensions.get('window');
+  const isSmall = width < 380;
   const fade = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
 
@@ -49,10 +51,10 @@ export default function StartScreen({ navigation }: NativeStackScreenProps<RootS
     <View style={styles.container}>
       <LinearGradient colors={["#0b0b12", "#151527"]} style={StyleSheet.absoluteFillObject} />
       <Animated.View style={{ alignItems: 'center', opacity: fade }}>
-        <Animated.Text style={[styles.title, { transform: [{ scale }] }]}>PHONK TILES</Animated.Text>
-        <Text style={styles.subtitle}>Tap to the Beat. Feel the Phonk.</Text>
-        <Pressable onPress={() => navigation.replace('Home')} style={({ pressed }) => [styles.btn, pressed && { opacity: 0.8 }]}>
-          <Text style={styles.btnText}>Start Game</Text>
+        <Animated.Text style={[styles.title, { fontSize: isSmall ? 36 : 48, transform: [{ scale }] }]}>PHONK TILES</Animated.Text>
+        <Text style={[styles.subtitle, { marginTop: isSmall ? 8 : 12, marginBottom: isSmall ? 18 : 24 }]}>Tap to the Beat. Feel the Phonk.</Text>
+        <Pressable onPress={() => navigation.replace('Home')} style={({ pressed }) => [styles.btn, { paddingHorizontal: isSmall ? 22 : 28, paddingVertical: isSmall ? 12 : 14 }, pressed && { opacity: 0.8 }]}>
+          <Text style={[styles.btnText, { fontSize: isSmall ? 14 : 16 }]}>Start Game</Text>
         </Pressable>
       </Animated.View>
     </View>

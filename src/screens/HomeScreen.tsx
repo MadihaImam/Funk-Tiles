@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, FlatList, Pressable, StyleSheet, Alert, Linking } from 'react-native';
+import { View, Text, FlatList, Pressable, StyleSheet, Alert, Dimensions } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../App';
 import { colors, spacing } from '@/theme/theme';
@@ -11,6 +11,8 @@ import { appAudioConfig } from '@/data/config';
 import { useFocusEffect } from '@react-navigation/native';
 
 export default function HomeScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Home'>) {
+  const { width } = Dimensions.get('window');
+  const isSmall = width < 380;
   const setSong = useGameStore(s => s.setSong);
   const setDifficulty = useGameStore(s => s.setDifficulty);
   const [selectedDifficulty, setSelectedDifficulty] = useState<DifficultyKey>('normal');
@@ -43,13 +45,6 @@ export default function HomeScreen({ navigation }: NativeStackScreenProps<RootSt
 
   const onPreview = async (song: Song) => {
     try {
-      if (song.previewUrl) {
-        const can = await Linking.canOpenURL(song.previewUrl);
-        if (can) {
-          await Linking.openURL(song.previewUrl);
-          return;
-        }
-      }
       if (previewRef.current) {
         await previewRef.current.unloadAsync();
         previewRef.current = null;
@@ -63,7 +58,7 @@ export default function HomeScreen({ navigation }: NativeStackScreenProps<RootSt
         try { await sound.stopAsync(); await sound.unloadAsync(); } catch {}
       }, 3000);
     } catch (e) {
-      Alert.alert('Preview unavailable', 'Add MP3 to ' + song.audio + ' or provide a previewUrl.');
+      Alert.alert('Preview unavailable', 'Add MP3 to ' + song.audio + '.');
     }
   };
 
@@ -80,9 +75,9 @@ export default function HomeScreen({ navigation }: NativeStackScreenProps<RootSt
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
-        <Text style={styles.header}>Select Your Phonk Track 🎶</Text>
-        <Pressable onPress={() => setMuted(m => !m)} style={[styles.smallBtn, { marginLeft: 'auto' }]}>
-          <Text style={styles.smallBtnText}>{muted ? 'Unmute' : 'Mute'}</Text>
+        <Text style={[styles.header, { fontSize: isSmall ? 18 : 22 } ]}>Select Your Phonk Track 🎶</Text>
+        <Pressable onPress={() => setMuted(m => !m)} style={[styles.smallBtn, { marginLeft: 'auto', paddingVertical: isSmall ? 6 : 8, paddingHorizontal: isSmall ? 10 : 12 }]}>
+          <Text style={[styles.smallBtnText, { fontSize: isSmall ? 12 : 14 }]}>{muted ? 'Unmute' : 'Mute'}</Text>
         </Pressable>
       </View>
       {DifficultyButtons}
@@ -91,21 +86,21 @@ export default function HomeScreen({ navigation }: NativeStackScreenProps<RootSt
         keyExtractor={(item) => item.title}
         contentContainerStyle={{ paddingBottom: spacing(6) }}
         renderItem={({ item }) => (
-          <View style={styles.card}>
+          <View style={[styles.card, { padding: isSmall ? spacing(1.5) : spacing(2) }]}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.title}>{item.title}</Text>
-              <Text style={styles.artist}>{item.artist}</Text>
-              <Text style={styles.meta}>BPM {item.bpm} • Difficulty set: {selectedDifficulty}</Text>
+              <Text style={[styles.title, { fontSize: isSmall ? 16 : 18 }]} numberOfLines={1} ellipsizeMode="tail">{item.title}</Text>
+              <Text style={[styles.artist, { fontSize: isSmall ? 12 : 14 }]} numberOfLines={1} ellipsizeMode="tail">{item.artist}</Text>
+              <Text style={[styles.meta, { fontSize: isSmall ? 11 : 12 }]}>BPM {item.bpm} • Difficulty set: {selectedDifficulty}</Text>
             </View>
-            <View style={styles.actions}>
-              <Pressable onPress={() => onPreview(item)} style={styles.smallBtn}><Text style={styles.smallBtnText}>Preview</Text></Pressable>
-              <Pressable onPress={() => onPlay(item)} style={styles.btn}><Text style={styles.btnText}>Play</Text></Pressable>
+            <View style={[styles.actions, { gap: isSmall ? 6 : 8 }]}>
+              <Pressable onPress={() => onPreview(item)} style={[styles.smallBtn, { paddingVertical: isSmall ? 6 : 8, paddingHorizontal: isSmall ? 10 : 12 }]}><Text style={[styles.smallBtnText, { fontSize: isSmall ? 12 : 14 }]}>Preview</Text></Pressable>
+              <Pressable onPress={() => onPlay(item)} style={[styles.btn, { paddingVertical: isSmall ? 8 : 10, paddingHorizontal: isSmall ? 14 : 16 }]}><Text style={[styles.btnText, { fontSize: isSmall ? 14 : 16 }]}>Play</Text></Pressable>
             </View>
           </View>
         )}
       />
       <Pressable style={styles.back} onPress={() => navigation.replace('Start')}>
-        <Text style={styles.backText}>Back to Start</Text>
+        <Text style={[styles.backText, { fontSize: isSmall ? 12 : 14 }]}>Back to Start</Text>
       </Pressable>
     </View>
   );

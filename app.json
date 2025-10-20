@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Phonk Tiles",
+    "slug": "phonk-tiles",
+    "owner": "malioh2520",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "phonktiles",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0b0b12"
+    },
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.phonktiles.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0b0b12"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "a83b3632-e186-404a-acc2-d8b2afdfd5c8"
+      }
+    },
+    "plugins": [
+      "expo-font"
+    ]
+  }
+}

@@ -369,12 +369,9 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
 
       <View style={{ flex: 1, flexDirection: 'row' }}>
         {lanes.map((_, laneIdx) => (
-          <Pressable
+          <View
             key={laneIdx}
             style={[styles.lane, { width: laneWidthLocal }]}
-            onPress={() => onTapLane(laneIdx)}
-            onPressIn={() => onLanePressIn(laneIdx)}
-            onPressOut={() => onLanePressOut(laneIdx)}
           >
             {/* Lane hit flash */}
             {now - laneFlashRef.current[laneIdx] < 120 && (
@@ -404,8 +401,39 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
             {particles.filter(p => p.lane === laneIdx).map(p => (
               <ParticleView key={p.id} p={p} sharedTime={time.value} />
             ))}
-          </Pressable>
+          </View>
         ))}
+        {/* Central multi-touch overlay */}
+        <View
+          style={StyleSheet.absoluteFill}
+          onTouchStart={(e) => {
+            const touches = e.nativeEvent.touches as any[];
+            for (const t of touches) {
+              const x = (t.locationX ?? 0);
+              const lane = Math.max(0, Math.min(LANES - 1, Math.floor(x / laneWidthLocal)));
+              onLanePressIn(lane);
+              // Attempt tap for non-hold tiles arriving now in that lane
+              onTapLane(lane);
+            }
+          }}
+          onTouchEnd={(e) => {
+            const touches = (e.nativeEvent.changedTouches as any[]) || [];
+            for (const t of touches) {
+              const x = (t.locationX ?? 0);
+              const lane = Math.max(0, Math.min(LANES - 1, Math.floor(x / laneWidthLocal)));
+              onLanePressOut(lane);
+            }
+          }}
+          onTouchCancel={(e) => {
+            const touches = (e.nativeEvent.changedTouches as any[]) || [];
+            for (const t of touches) {
+              const x = (t.locationX ?? 0);
+              const lane = Math.max(0, Math.min(LANES - 1, Math.floor(x / laneWidthLocal)));
+              onLanePressOut(lane);
+            }
+          }}
+          pointerEvents="auto"
+        />
         {/* BPM pulse overlay */}
         <View pointerEvents="none" style={[styles.pulseOverlay, { opacity: pulseOpacity }]} />
       </View>

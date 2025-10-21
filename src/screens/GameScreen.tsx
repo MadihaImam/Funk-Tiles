@@ -16,7 +16,7 @@ const laneWidth = width / LANES;
 const hitLineY = height - 140; // target line
 
 // Tile structure
-interface Tile { id: number; lane: number; y: number; speed: number; spawnTs: number; arrivalTs: number; }
+interface Tile { id: number; lane: number; y: number; speed: number; spawnTs: number; arrivalTs: number; holdMs: number; endTs: number; }
 
 export default function GameScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Game'>) {
   const { currentSong, difficulty, hit, hitWith, resetRun, isPaused, pause, resume } = useGameStore();
@@ -37,6 +37,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
   const missSfxRef = useRef<Audio.Sound | null>(null);
   const laneQualityTsRef = useRef<number[]>([0, 0, 0, 0]);
   const laneQualityStrengthRef = useRef<number[]>([0, 0, 0, 0]); // 1..3, decays over time
+  const heldLanesRef = useRef<Set<number>>(new Set());
+  const holdingTileIdsRef = useRef<Set<number>>(new Set());
 
   const diffConf = useMemo(() => currentSong?.difficulties[difficulty], [currentSong, difficulty]);
   const beatInterval = useMemo(() => currentSong ? 60 / currentSong.bpm : 0.5, [currentSong]);
@@ -127,7 +129,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         const speed = distancePx / travelMs; // px per ms
         const spawnTs = t;
         const arrivalTs = spawnTs + travelMs;
-        const spawnTiles: { lane: number }[] = [];
+        const spawnTiles: { lane: number; holdMs?: number }[] = [];
         const pat = currentSong?.pattern;
         if (pat && pat.length > 0) {
           let step = pat[patternIdxRef.current % pat.length];
@@ -135,7 +137,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
           // step is an array of lanes (allowing chords)
           // limit to max 2 lanes to keep human-playable
           step = Array.from(new Set(step)).slice(0, 2);
-          for (const ln of step) spawnTiles.push({ lane: Math.max(0, Math.min(LANES - 1, ln)) });
+          for (const ln of step) spawnTiles.push({ lane: Math.max(0, Math.min(LANES - 1, ln)), holdMs: 0 });
           beatsSinceChordRef.current = step.length > 1 ? 0 : (beatsSinceChordRef.current + 1);
         } else {
           // fallback: random single or double chord
@@ -144,17 +146,21 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
             const first = Math.floor(Math.random() * LANES);
             let second = Math.floor(Math.random() * LANES);
             if (second === first) second = (second + 1) % LANES;
-            spawnTiles.push({ lane: first }, { lane: second });
+            spawnTiles.push({ lane: first, holdMs: 0 }, { lane: second, holdMs: 0 });
             beatsSinceChordRef.current = 0;
           } else {
-            spawnTiles.push({ lane: Math.floor(Math.random() * LANES) });
+            // either a tap or an occasional hold note (single-lane only)
+            const ln = Math.floor(Math.random() * LANES);
+            const isHold = Math.random() < 0.15; // 15% chance of a hold note
+            const holdMs = isHold ? (beatMs * (1.0 + Math.random() * 0.8)) : 0; // 1.0..1.8 beats
+            spawnTiles.push({ lane: ln, holdMs });
             beatsSinceChordRef.current += 1;
           }
         }
         if (spawnTiles.length > 0) {
           setTiles(prev => [
             ...prev,
-            ...spawnTiles.map(s => ({ id: nextTileId.current++, lane: s.lane, y: startY, speed, spawnTs, arrivalTs }))
+            ...spawnTiles.map(s => ({ id: nextTileId.current++, lane: s.lane, y: startY, speed, spawnTs, arrivalTs, holdMs: s.holdMs ?? 0, endTs: arrivalTs + (s.holdMs ?? 0) }))
           ]);
         }
         lastSpawn = t;
@@ -162,14 +168,45 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
       // advance shared time for Reanimated tiles
       const dt = t - lastTime;
       time.value = t;
-      // strict fail: if any tile passes window -> game over (slightly wider window)
+      // strict fail: if any tile passes window or hold broken -> game over (slightly wider window)
       const goodWindowMs = 180;
       const liveTiles = tilesRef.current;
       for (const tile of liveTiles) {
-        if (t > tile.arrivalTs + goodWindowMs) {
-          try { missSfxRef.current?.replayAsync(); } catch {}
-          endGame();
-          return;
+        if (tile.holdMs > 0) {
+          const laneHeld = heldLanesRef.current.has(tile.lane);
+          // must be holding shortly after arrival
+          if (t > tile.arrivalTs + goodWindowMs && !holdingTileIdsRef.current.has(tile.id)) {
+            // never started holding in time
+            try { missSfxRef.current?.replayAsync(); } catch {}
+            endGame();
+            return;
+          }
+          // if started holding, releasing early before endTs - window is a fail
+          if (holdingTileIdsRef.current.has(tile.id)) {
+            if (!laneHeld && t < tile.endTs - goodWindowMs) {
+              try { missSfxRef.current?.replayAsync(); } catch {}
+              endGame();
+              return;
+            }
+            // complete hold when past endTs within window
+            if (t >= tile.endTs - goodWindowMs) {
+              // success: remove tile and score
+              setTiles(prev => prev.filter(x => x.id !== tile.id));
+              holdingTileIdsRef.current.delete(tile.id);
+              hitWith(3);
+              try { hitSfxRef.current?.replayAsync(); } catch {}
+              laneQualityTsRef.current[tile.lane] = performance.now();
+              laneQualityStrengthRef.current[tile.lane] = 3;
+              break;
+            }
+          }
+        } else {
+          // tap tile: if it passes window unhit -> fail
+          if (t > tile.arrivalTs + goodWindowMs) {
+            try { missSfxRef.current?.replayAsync(); } catch {}
+            endGame();
+            return;
+          }
         }
       }
 
@@ -201,7 +238,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         const tile = prev[i];
         // Only allow tap if the tile for THIS lane is within window; ignore wrong-lane taps
         const now = timeRef.current;
-        if (tile.lane === laneIdx && Math.abs(now - tile.arrivalTs) < 180) { hitIndex = i; break; }
+        if (tile.lane === laneIdx && tile.holdMs === 0 && Math.abs(now - tile.arrivalTs) < 180) { hitIndex = i; break; }
       }
       if (hitIndex >= 0) {
         const newArr = [...prev];
@@ -243,6 +280,22 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
       }
     });
   }, [endGame]);
+
+  // Multi-finger: mark holds by lane on press in/out
+  const onLanePressIn = useCallback((laneIdx: number) => {
+    heldLanesRef.current.add(laneIdx);
+    // if a hold tile is arriving now, mark as started holding
+    const now = timeRef.current;
+    for (const tile of tilesRef.current) {
+      if (tile.lane === laneIdx && tile.holdMs > 0 && Math.abs(now - tile.arrivalTs) < 180) {
+        holdingTileIdsRef.current.add(tile.id);
+      }
+    }
+  }, []);
+
+  const onLanePressOut = useCallback((laneIdx: number) => {
+    heldLanesRef.current.delete(laneIdx);
+  }, []);
 
   const onPauseToggle = async () => {
     if (isPaused) {
@@ -290,7 +343,13 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
 
       <View style={{ flex: 1, flexDirection: 'row' }}>
         {lanes.map((_, laneIdx) => (
-          <Pressable key={laneIdx} style={[styles.lane, { width: laneWidth }]} onPress={() => onTapLane(laneIdx)}>
+          <Pressable
+            key={laneIdx}
+            style={[styles.lane, { width: laneWidth }]}
+            onPress={() => onTapLane(laneIdx)}
+            onPressIn={() => onLanePressIn(laneIdx)}
+            onPressOut={() => onLanePressOut(laneIdx)}
+          >
             {/* Lane hit flash */}
             {now - laneFlashRef.current[laneIdx] < 120 && (
               <View style={styles.laneFlash} />
@@ -335,7 +394,16 @@ function TileView({ tile, sharedTime }: { tile: Tile; sharedTime: Animated.Share
     const yNow = tile.y + tile.speed * elapsed;
     return { transform: [{ translateY: yNow }]} as any;
   });
-  return <Animated.View style={[styles.tile, styles.tileGlow, aStyle, { left: 8, right: 8 }]} />;
+  // For hold notes, draw a tail to indicate duration
+  const tailPx = tile.holdMs > 0 ? tile.speed * tile.holdMs : 0;
+  return (
+    <Animated.View style={[aStyle, { position: 'absolute', left: 8, right: 8 }]}>
+      {tailPx > 0 && (
+        <View style={[styles.holdTail, { height: Math.max(0, tailPx) }]} />
+      )}
+      <View style={[styles.tile, styles.tileGlow]} />
+    </Animated.View>
+  );
 }
 
 function ParticleView({ p, sharedTime }: { p: { id: number; lane: number; y: number; x: number; born: number; dx: number }; sharedTime: number }) {

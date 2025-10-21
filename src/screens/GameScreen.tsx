@@ -109,7 +109,13 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
       if (t - lastSpawn >= spawnInterval * 1000) {
         const startY = -100;
         const distancePx = hitLineY - startY;
-        const travelBeats = 1.0; // one beat travel for clarity
+        // Global ramp: start at 1.0 beat travel, gradually decrease to minTravelBeats
+        const elapsedMs = startTs ? (t - startTs) : 0;
+        const beatMs = beatInterval * 1000;
+        const elapsedBeats = beatMs > 0 ? (elapsedMs / beatMs) : 0;
+        const rampK = 0.02; // ramp intensity per beat
+        const minTravelBeats = 0.65; // do not go faster than this
+        const travelBeats = Math.max(minTravelBeats, 1.0 - rampK * elapsedBeats);
         const travelMs = travelBeats * beatInterval * 1000;
         const speed = distancePx / travelMs; // px per ms
         const spawnTs = t;

@@ -46,6 +46,13 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
   // Pattern support: if currentSong has pattern, follow it deterministically; else random with optional chords
   const doubleChance = useRef(0.25); // 25% chance to spawn two simultaneous lanes when no pattern
   const patternIdxRef = useRef(0);
+  const beatsSinceChordRef = useRef(10); // limit chord frequency
+
+  const endGame = useCallback(async () => {
+    try { await audioRef.current?.stopAsync(); } catch {}
+    try { await audioRef.current?.unloadAsync(); } catch {}
+    navigation.replace('GameOver');
+  }, [navigation]);
 
   // keep a live ref of tiles to avoid stale closure in RAF loop
   useEffect(() => { tilesRef.current = tiles; }, [tiles]);
@@ -127,15 +134,19 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
           patternIdxRef.current++;
           // step is an array of lanes (allowing chords)
           for (const ln of step) spawnTiles.push({ lane: Math.max(0, Math.min(LANES - 1, ln)) });
+          beatsSinceChordRef.current = step.length > 1 ? 0 : (beatsSinceChordRef.current + 1);
         } else {
           // fallback: random single or double chord
-          if (Math.random() < doubleChance.current) {
+          const allowChord = beatsSinceChordRef.current >= 3; // at most one chord every 4 beats
+          if (allowChord && Math.random() < doubleChance.current) {
             const first = Math.floor(Math.random() * LANES);
             let second = Math.floor(Math.random() * LANES);
             if (second === first) second = (second + 1) % LANES;
             spawnTiles.push({ lane: first }, { lane: second });
+            beatsSinceChordRef.current = 0;
           } else {
             spawnTiles.push({ lane: Math.floor(Math.random() * LANES) });
+            beatsSinceChordRef.current += 1;
           }
         }
         if (spawnTiles.length > 0) {
@@ -148,19 +159,16 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
       }
       // advance shared time for Reanimated tiles
       const dt = t - lastTime;
-      let gameOver = false;
       time.value = t;
-      // compute misses time-based: if past arrival by GOOD window -> miss
+      // strict fail: if any tile passes window -> game over
       const goodWindowMs = 120;
       const liveTiles = tilesRef.current;
       for (const tile of liveTiles) {
-        if (t > tile.arrivalTs + goodWindowMs) { gameOver = true; break; }
-      }
-
-      if (gameOver) {
-        try { missSfxRef.current?.replayAsync(); } catch {}
-        navigation.replace('GameOver');
-        return;
+        if (t > tile.arrivalTs + goodWindowMs) {
+          try { missSfxRef.current?.replayAsync(); } catch {}
+          endGame();
+          return;
+        }
       }
 
       // end condition: if audio ended and no tiles left, navigate
@@ -227,11 +235,12 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         }
         return newArr;
       } else {
-        // wrong-lane or off-time tap: ignore (do not end the game)
+        // strict fail on wrong-lane/off-time tap
+        (async () => { try { await missSfxRef.current?.replayAsync(); } catch {}; await endGame(); })();
         return prev;
       }
     });
-  }, []);
+  }, [endGame]);
 
   const onPauseToggle = async () => {
     if (isPaused) {
@@ -303,7 +312,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
               return <View style={[styles.laneQuality, { opacity }]} />;
             })()}
             {tiles.filter(t => t.lane === laneIdx).map(tile => (
-              <TileView key={tile.id} tile={tile} sharedTime={time.value} />
+              <TileView key={tile.id} tile={tile} sharedTime={time} />
             ))}
             {particles.filter(p => p.lane === laneIdx).map(p => (
               <ParticleView key={p.id} p={p} sharedTime={time.value} />
@@ -318,9 +327,9 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
 }
 
 // Child component so hooks are used safely per tile
-function TileView({ tile, sharedTime }: { tile: Tile; sharedTime: number }) {
+function TileView({ tile, sharedTime }: { tile: Tile; sharedTime: Animated.SharedValue<number> }) {
   const aStyle = useAnimatedStyle(() => {
-    const elapsed = sharedTime - tile.spawnTs;
+    const elapsed = sharedTime.value - tile.spawnTs;
     const yNow = tile.y + tile.speed * elapsed;
     return { transform: [{ translateY: yNow }]} as any;
   });

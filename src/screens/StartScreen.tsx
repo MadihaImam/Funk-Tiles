@@ -13,6 +13,8 @@ export default function StartScreen({ navigation }: NativeStackScreenProps<RootS
   const isSmall = width < 380;
   const fade = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
+  const shadeA = useRef(new Animated.Value(0)).current;
+  const shadeB = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     Animated.sequence([
@@ -23,6 +25,20 @@ export default function StartScreen({ navigation }: NativeStackScreenProps<RootS
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1, duration: 2000, useNativeDriver: true }),
         Animated.timing(pulse, { toValue: 0, duration: 2000, useNativeDriver: true }),
+      ])
+    ).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(shadeA, { toValue: 1, duration: 9000, useNativeDriver: true }),
+        Animated.timing(shadeA, { toValue: 0, duration: 9000, useNativeDriver: true }),
+      ])
+    ).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(shadeB, { toValue: 0, duration: 12000, useNativeDriver: true }),
+        Animated.timing(shadeB, { toValue: 1, duration: 12000, useNativeDriver: true }),
       ])
     ).start();
 
@@ -46,10 +62,20 @@ export default function StartScreen({ navigation }: NativeStackScreenProps<RootS
   }, []);
 
   const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.03] });
+  const shiftA = shadeA.interpolate({ inputRange: [0, 1], outputRange: [-30, 30] });
+  const rotA = shadeA.interpolate({ inputRange: [0, 1], outputRange: ['-8deg', '8deg'] });
+  const shiftB = shadeB.interpolate({ inputRange: [0, 1], outputRange: [25, -25] });
+  const rotB = shadeB.interpolate({ inputRange: [0, 1], outputRange: ['6deg', '-6deg'] });
 
   return (
     <View style={styles.container}>
       <LinearGradient colors={["#0b0b12", "#151527"]} style={StyleSheet.absoluteFillObject} />
+      <Animated.View style={[StyleSheet.absoluteFillObject as any, { transform: [{ translateX: shiftA }, { translateY: Animated.multiply(shiftA, 0.4) }, { rotate: rotA }], opacity: 0.45 }] }>
+        <LinearGradient colors={["#0b0b12", "#1a1130", "#151527"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFillObject} />
+      </Animated.View>
+      <Animated.View style={[StyleSheet.absoluteFillObject as any, { transform: [{ translateX: shiftB }, { translateY: Animated.multiply(shiftB, -0.3) }, { rotate: rotB }], opacity: 0.35 }] }>
+        <LinearGradient colors={["#0b0b12", "#101a2e", "#151527"]} start={{ x: 1, y: 0 }} end={{ x: 0, y: 1 }} style={StyleSheet.absoluteFillObject} />
+      </Animated.View>
       <Animated.View style={{ alignItems: 'center', opacity: fade }}>
         <Animated.Text style={[styles.title, { fontSize: isSmall ? 36 : 48, transform: [{ scale }] }]}>PHONK TILES</Animated.Text>
         <Text style={[styles.subtitle, { marginTop: isSmall ? 8 : 12, marginBottom: isSmall ? 18 : 24 }]}>Tap to the Beat. Feel the Phonk.</Text>

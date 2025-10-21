@@ -40,9 +40,11 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
 
   const diffConf = useMemo(() => currentSong?.difficulties[difficulty], [currentSong, difficulty]);
   const beatInterval = useMemo(() => currentSong ? 60 / currentSong.bpm : 0.5, [currentSong]);
-  // spawn every beat divided by density
-  const spawnInterval = useMemo(() => diffConf ? (beatInterval / Math.max(0.5, diffConf.density || 1)) : beatInterval, [beatInterval, diffConf]);
+  // Spawn cadence: one beat between spawns
+  const spawnInterval = useMemo(() => beatInterval, [beatInterval]);
   const time = useSharedValue(0);
+  // Random pattern with occasional double-lane chords
+  const doubleChance = useRef(0.25); // 25% chance to spawn two simultaneous lanes
 
   // keep a live ref of tiles to avoid stale closure in RAF loop
   useEffect(() => { tilesRef.current = tiles; }, [tiles]);
@@ -104,16 +106,28 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
       if (isPaused) { rafRef.current = requestAnimationFrame(tick); return; }
       // spawn
       if (t - lastSpawn >= spawnInterval * 1000) {
-        const lane = Math.floor(Math.random() * LANES);
-        // compute speed so the tile reaches hitLine exactly after travelMs
         const startY = -100;
         const distancePx = hitLineY - startY;
-        const travelBeats = 1.0 / Math.max(0.75, (diffConf.density || 1)); // faster density -> shorter travel
+        const travelBeats = 1.0; // one beat travel for clarity
         const travelMs = travelBeats * beatInterval * 1000;
         const speed = distancePx / travelMs; // px per ms
         const spawnTs = t;
         const arrivalTs = spawnTs + travelMs;
-        setTiles(prev => [...prev, { id: nextTileId.current++, lane, y: startY, speed, spawnTs, arrivalTs }]);
+        const spawnTiles: { lane: number }[] = [];
+        // decide single vs double spawn
+        if (Math.random() < doubleChance.current) {
+          // spawn two distinct random lanes
+          const first = Math.floor(Math.random() * LANES);
+          let second = Math.floor(Math.random() * LANES);
+          if (second === first) second = (second + 1) % LANES;
+          spawnTiles.push({ lane: first }, { lane: second });
+        } else {
+          spawnTiles.push({ lane: Math.floor(Math.random() * LANES) });
+        }
+        setTiles(prev => [
+          ...prev,
+          ...spawnTiles.map(s => ({ id: nextTileId.current++, lane: s.lane, y: startY, speed, spawnTs, arrivalTs }))
+        ]);
         lastSpawn = t;
       }
       // advance shared time for Reanimated tiles
@@ -159,9 +173,9 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
       let hitIndex = -1;
       for (let i = 0; i < prev.length; i++) {
         const tile = prev[i];
-        // time-based proximity
+        // Only allow tap if the tile for THIS lane is within window; ignore wrong-lane taps
         const now = timeRef.current;
-        if (tile.lane === laneIdx && Math.abs(now - tile.arrivalTs) < 140) { hitIndex = i; break; }
+        if (tile.lane === laneIdx && Math.abs(now - tile.arrivalTs) < 160) { hitIndex = i; break; }
       }
       if (hitIndex >= 0) {
         const newArr = [...prev];
@@ -197,9 +211,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         }
         return newArr;
       } else {
-        // miss -> end game
-        try { missSfxRef.current?.replayAsync(); } catch {}
-        navigation.replace('GameOver');
+        // wrong-lane or off-time tap: ignore (do not end the game)
         return prev;
       }
     });
@@ -247,7 +259,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         </View>
       </View>
 
-      <View style={styles.hitLine} />
+      <View style={[styles.hitLine]} pointerEvents="none" />
 
       <View style={{ flex: 1, flexDirection: 'row' }}>
         {lanes.map((_, laneIdx) => (

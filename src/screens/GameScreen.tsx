@@ -43,8 +43,9 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
   // Spawn cadence: one beat between spawns
   const spawnInterval = useMemo(() => beatInterval, [beatInterval]);
   const time = useSharedValue(0);
-  // Random pattern with occasional double-lane chords
-  const doubleChance = useRef(0.25); // 25% chance to spawn two simultaneous lanes
+  // Pattern support: if currentSong has pattern, follow it deterministically; else random with optional chords
+  const doubleChance = useRef(0.25); // 25% chance to spawn two simultaneous lanes when no pattern
+  const patternIdxRef = useRef(0);
 
   // keep a live ref of tiles to avoid stale closure in RAF loop
   useEffect(() => { tilesRef.current = tiles; }, [tiles]);
@@ -114,20 +115,29 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         const spawnTs = t;
         const arrivalTs = spawnTs + travelMs;
         const spawnTiles: { lane: number }[] = [];
-        // decide single vs double spawn
-        if (Math.random() < doubleChance.current) {
-          // spawn two distinct random lanes
-          const first = Math.floor(Math.random() * LANES);
-          let second = Math.floor(Math.random() * LANES);
-          if (second === first) second = (second + 1) % LANES;
-          spawnTiles.push({ lane: first }, { lane: second });
+        const pat = currentSong?.pattern;
+        if (pat && pat.length > 0) {
+          const step = pat[patternIdxRef.current % pat.length];
+          patternIdxRef.current++;
+          // step is an array of lanes (allowing chords)
+          for (const ln of step) spawnTiles.push({ lane: Math.max(0, Math.min(LANES - 1, ln)) });
         } else {
-          spawnTiles.push({ lane: Math.floor(Math.random() * LANES) });
+          // fallback: random single or double chord
+          if (Math.random() < doubleChance.current) {
+            const first = Math.floor(Math.random() * LANES);
+            let second = Math.floor(Math.random() * LANES);
+            if (second === first) second = (second + 1) % LANES;
+            spawnTiles.push({ lane: first }, { lane: second });
+          } else {
+            spawnTiles.push({ lane: Math.floor(Math.random() * LANES) });
+          }
         }
-        setTiles(prev => [
-          ...prev,
-          ...spawnTiles.map(s => ({ id: nextTileId.current++, lane: s.lane, y: startY, speed, spawnTs, arrivalTs }))
-        ]);
+        if (spawnTiles.length > 0) {
+          setTiles(prev => [
+            ...prev,
+            ...spawnTiles.map(s => ({ id: nextTileId.current++, lane: s.lane, y: startY, speed, spawnTs, arrivalTs }))
+          ]);
+        }
         lastSpawn = t;
       }
       // advance shared time for Reanimated tiles

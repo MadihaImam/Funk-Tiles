@@ -6,6 +6,8 @@ export type Song = {
   audio: string; // path within assets
   bpm: number;
   difficulties: Record<DifficultyKey, Difficulty>;
+  // Optional deterministic lane pattern; each entry is a beat, array of lanes allows chords
+  pattern?: number[][];
 };
 
 export const songs: Song[] = [
@@ -19,6 +21,7 @@ export const songs: Song[] = [
       normal: { speed: 1.1, density: 1.0 },
       hard: { speed: 1.3, density: 1.3 },
     },
+    pattern: [[0],[1],[2],[3],[2],[1],[0,2],[3],[1],[0]],
   },
   {
     title: 'Não Era Amor',
@@ -30,6 +33,7 @@ export const songs: Song[] = [
       normal: { speed: 1.0, density: 1.0 },
       hard: { speed: 1.2, density: 1.3 },
     },
+    pattern: [[1],[1],[2],[2],[3],[3],[1,3],[0],[0],[2]],
   },
   {
     title: 'Montagem Xonada',
@@ -41,6 +45,7 @@ export const songs: Song[] = [
       normal: { speed: 1.15, density: 1.0 },
       hard: { speed: 1.3, density: 1.4 },
     },
+    pattern: [[0],[2],[1],[3],[0,3],[2],[1],[1],[2],[0]],
   },
   {
     title: 'Montagem Coma',
@@ -52,6 +57,7 @@ export const songs: Song[] = [
       normal: { speed: 1.2, density: 1.0 },
       hard: { speed: 1.4, density: 1.5 },
     },
+    pattern: [[3],[2],[1],[0],[1,3],[2],[0],[2],[3],[1]],
   },
   {
     title: 'Dia Delícia',
@@ -63,6 +69,7 @@ export const songs: Song[] = [
       normal: { speed: 1.0, density: 1.0 },
       hard: { speed: 1.2, density: 1.2 },
     },
+    pattern: [[0],[0],[1],[1],[2],[2],[3],[3],[1,2],[0]],
   },
   {
     title: 'Mente Má',
@@ -74,5 +81,6 @@ export const songs: Song[] = [
       normal: { speed: 1.05, density: 1.0 },
       hard: { speed: 1.25, density: 1.3 },
     },
+    pattern: [[2],[1],[2],[3],[0],[1,3],[2],[0],[1],[3]],
   },
 ];

@@ -18,7 +18,8 @@ interface Tile { id: number; lane: number; y: number; speed: number; spawnTs: nu
 
 export default function GameScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Game'>) {
   const { currentSong, difficulty, hit, hitWith, resetRun, isPaused, pause, resume } = useGameStore();
-  const performanceMode = true; // disable heavy visuals for smoother gameplay
+  // Prefer full effects on native; keep perf mode on web for smoothness
+  const performanceMode = Platform.OS === 'web';
   const [tiles, setTiles] = useState<Tile[]>([]);
   const tilesRef = useRef<Tile[]>([]);
   const [startTs, setStartTs] = useState<number | null>(null);
@@ -125,8 +126,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
     patternIdxRef.current = 0;
     beatsSinceChordRef.current = 10;
     burstBeatsRef.current = 0;
-    // fewer notes when performance mode: spawn every 3 beats
-    baseBeatStepRef.current = performanceMode ? 3 : 2;
+    // fewer notes when performance mode: spawn every 4 beats (native keeps 2)
+    baseBeatStepRef.current = performanceMode ? 4 : 2;
     // seed next beat index to current audio position so first spawn happens immediately
     const beatMs = beatInterval * 1000;
     const posBeats = beatMs > 0 ? Math.floor((posMsRef.current || 0) / beatMs) : 0;
@@ -179,12 +180,29 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
           }
         }
         if (spawnTiles.length > 0) {
-          setTiles(prev => [
-            ...prev,
-            ...spawnTiles.map(s => ({ id: nextTileId.current++, lane: s.lane, y: startY, speed, spawnTs, arrivalTs, holdMs: s.holdMs ?? 0, endTs: arrivalTs + (s.holdMs ?? 0) }))
-          ]);
-          spawnedCountRef.current += spawnTiles.length;
-          if (firstArrivalTsRef.current == null) firstArrivalTsRef.current = arrivalTs;
+          // Cap simultaneous tiles for smoothness, stricter on web
+          const maxPerLane = performanceMode ? 1 : 3;
+          const maxTotal = performanceMode ? 12 : 24;
+          const current = tilesRef.current;
+          const perLaneCount: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0 };
+          for (const t of current) perLaneCount[t.lane] = (perLaneCount[t.lane] ?? 0) + 1;
+          let totalAllowed = Math.max(0, maxTotal - current.length);
+          const allowed: typeof spawnTiles = [];
+          for (const s of spawnTiles) {
+            if (totalAllowed <= 0) break;
+            if ((perLaneCount[s.lane] ?? 0) >= maxPerLane) continue;
+            allowed.push(s);
+            perLaneCount[s.lane] = (perLaneCount[s.lane] ?? 0) + 1;
+            totalAllowed--;
+          }
+          if (allowed.length > 0) {
+            setTiles(prev => [
+              ...prev,
+              ...allowed.map(s => ({ id: nextTileId.current++, lane: s.lane, y: startY, speed, spawnTs, arrivalTs, holdMs: s.holdMs ?? 0, endTs: arrivalTs + (s.holdMs ?? 0) }))
+            ]);
+            spawnedCountRef.current += allowed.length;
+            if (firstArrivalTsRef.current == null) firstArrivalTsRef.current = arrivalTs;
+          }
         }
         // optionally start a short burst (disabled in performance mode)
         if (!performanceMode && burstBeatsRef.current <= 0 && Math.random() < 0.1) {
@@ -380,6 +398,15 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         </View>
       </View>
 
+      {/* Rotating disc HUD (perf-light) */}
+      {!performanceMode && (
+        <RotatingDisc
+          sharedTime={time}
+          beatMs={(beatInterval || 0.5) * 1000}
+          startTs={startTs ?? 0}
+        />
+      )}
+
       <View style={[styles.hitLine, { top: hitLineYLocal }]} pointerEvents="none" />
 
       <View style={{ flex: 1, flexDirection: 'row' }}>
@@ -467,15 +494,31 @@ function TileView({ tile, sharedTime, laneWidth, performanceMode }: { tile: Tile
     const yNow = tile.y + tile.speed * elapsed;
     return { transform: [{ translateY: yNow }]} as any;
   });
-  // For hold notes, draw a tail to indicate duration
-  const tailPx = tile.holdMs > 0 ? tile.speed * tile.holdMs : 0;
   return (
-    <Animated.View style={[aStyle, { position: 'absolute', left: 8, width: Math.max(0, laneWidth - 16) }]}>
-      {tailPx > 0 && (
-        <View style={[styles.holdTail, { height: Math.max(0, tailPx) }]} />
-      )}
+    <Animated.View style={[aStyle, { position: 'absolute', left: 6, right: 6 }]}>
       <View style={[styles.tile, !performanceMode && styles.tileGlow]} />
     </Animated.View>
+  );
+}
+
+// Rotating vinyl-like disc with beat-synced scaling
+function RotatingDisc({ sharedTime, beatMs, startTs }: { sharedTime: Animated.SharedValue<number>; beatMs: number; startTs: number }) {
+  const discStyle = useAnimatedStyle(() => {
+    const t = sharedTime.value;
+    const rot = (t * 0.06) % 360; // deg per ms (slow spin)
+    const phase = beatMs > 0 ? (((t - startTs) % beatMs) / beatMs) : 0;
+    const scale = 1 + 0.05 * Math.exp(-6 * phase);
+    return {
+      transform: [{ rotate: `${rot}deg` }, { scale }],
+    } as any;
+  });
+  return (
+    <View style={styles.discWrap} pointerEvents="none">
+      <Animated.View style={[styles.discOuter, discStyle]}>
+        <View style={styles.discGroove} />
+        <View style={styles.discCenter} />
+      </Animated.View>
+    </View>
   );
 }
 
@@ -498,6 +541,10 @@ const styles = StyleSheet.create({
   topTitle: { color: colors.white, fontWeight: '800' },
   topMeta: { color: '#cfd8ff' },
   pause: { color: colors.neonCyan, fontWeight: '800' },
+  discWrap: { position: 'absolute', right: 12, top: 72 },
+  discOuter: { width: 88, height: 88, borderRadius: 44, backgroundColor: '#0b0b0f', borderWidth: 2, borderColor: '#1d1d30', alignItems: 'center', justifyContent: 'center' },
+  discGroove: { position: 'absolute', width: 70, height: 70, borderRadius: 35, borderWidth: 2, borderColor: '#202038' },
+  discCenter: { width: 16, height: 16, borderRadius: 8, backgroundColor: '#9b5cff' },
   lane: { flex: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#151532', justifyContent: 'flex-start', overflow: 'hidden' },
   tile: { position: 'absolute', height: 200, borderRadius: 8, backgroundColor: '#000000', opacity: 0.98, borderWidth: 2, borderColor: '#ffffff' },
   // stronger glow on tiles

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, FlatList, Pressable, StyleSheet, Alert, Dimensions } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle } from 'react-native-reanimated';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../App';
 import { colors, spacing } from '@/theme/theme';
@@ -80,6 +81,7 @@ export default function HomeScreen({ navigation }: NativeStackScreenProps<RootSt
           <Text style={[styles.smallBtnText, { fontSize: isSmall ? 12 : 14 }]}>{muted ? 'Unmute' : 'Mute'}</Text>
         </Pressable>
       </View>
+      <TopRightDisc />
       {DifficultyButtons}
       <FlatList
         data={songs}
@@ -106,10 +108,38 @@ export default function HomeScreen({ navigation }: NativeStackScreenProps<RootSt
   );
 }
 
+function TopRightDisc() {
+  const t = useSharedValue(0);
+  useEffect(() => {
+    let raf = 0;
+    const loop = () => { t.value = Date.now(); raf = requestAnimationFrame(loop); };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  const aStyle = useAnimatedStyle(() => {
+    const rot = ((t.value % 60000) / 60000) * 360 * 4; // 4 RPM visual
+    const phase = (t.value % 800) / 800; // light pulse
+    const scale = 1 + 0.04 * Math.exp(-6 * phase);
+    return { transform: [{ rotate: `${rot}deg` }, { scale }] } as any;
+  });
+  return (
+    <View style={styles.discWrap} pointerEvents="none">
+      <Animated.View style={[styles.discOuter, aStyle]}>
+        <View style={styles.discGroove} />
+        <View style={styles.discCenter} />
+      </Animated.View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg, paddingTop: spacing(5), paddingHorizontal: spacing(2) },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing(1) },
   header: { color: colors.white, fontSize: 22, fontWeight: '800', marginBottom: spacing(2) },
+  discWrap: { position: 'absolute', right: spacing(2), top: spacing(6) },
+  discOuter: { width: 84, height: 84, borderRadius: 42, backgroundColor: '#0b0b0f', borderWidth: 2, borderColor: '#1d1d30', alignItems: 'center', justifyContent: 'center' },
+  discGroove: { position: 'absolute', width: 66, height: 66, borderRadius: 33, borderWidth: 2, borderColor: '#202038' },
+  discCenter: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#9b5cff' },
   diffRow: { flexDirection: 'row', gap: 8, marginBottom: spacing(2) },
   diffBtn: { borderWidth: 1, borderColor: '#3a3a5a', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
   diffBtnActive: { backgroundColor: '#2a2140', borderColor: colors.neonPurple },

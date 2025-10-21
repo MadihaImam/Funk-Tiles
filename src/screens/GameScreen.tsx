@@ -1,3 +1,6 @@
+  // Compute hit line Y with a floor so it's always visible on small viewports
+  const winHeight = Dimensions.get('window').height;
+  const hitLineYLocal = Math.max(220, winHeight - 140);
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Dimensions, Pressable, Alert, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,7 +16,6 @@ import { appAudioConfig, vfxConfig } from '@/data/config';
 const LANES = 4;
 const { height, width } = Dimensions.get('window');
 const laneWidth = width / LANES;
-const hitLineY = height - 140; // target line
 
 // Tile structure
 interface Tile { id: number; lane: number; y: number; speed: number; spawnTs: number; arrivalTs: number; holdMs: number; endTs: number; }
@@ -129,7 +131,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
       // spawn (handle multiple intervals if a frame stutters)
       while (t - lastSpawn >= currentIntervalMs) {
         const startY = -100;
-        const distancePx = hitLineY - startY;
+        const distancePx = Math.max(220, Dimensions.get('window').height - 140) - startY;
         // Global ramp: start slower at 2.0 beats travel, gently decrease to minTravelBeats
         const elapsedMs = startTs ? (t - startTs) : 0;
         const beatMs = beatInterval * 1000;
@@ -275,7 +277,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         laneFlashRef.current[laneIdx] = performance.now();
         laneQualityTsRef.current[laneIdx] = performance.now();
         laneQualityStrengthRef.current[laneIdx] = pts;
-        const ft = { id: nextFloatId.current++, lane: laneIdx, y: hitLineY - 20, label };
+        const ft = { id: nextFloatId.current++, lane: laneIdx, y: hitLineYLocal - 20, label };
         setFloatTexts(arr => [...arr, ft]);
         setTimeout(() => setFloatTexts(arr => arr.filter(x => x.id !== ft.id)), 500);
         if (label === 'PERFECT') {
@@ -283,7 +285,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
           const burst = Array.from({ length: 6 }).map(() => ({
             id: nextParticleId.current++,
             lane: laneIdx,
-            y: hitLineY - 20 - Math.random() * 30,
+            y: hitLineYLocal - 20 - Math.random() * 30,
             x: Math.random() * (laneWidth - 24) + 12,
             born: performance.now(),
             dx: Math.random() < 0.5 ? -1 : 1,
@@ -360,7 +362,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         </View>
       </View>
 
-      <View style={[styles.hitLine]} pointerEvents="none" />
+      <View style={[styles.hitLine, { top: hitLineYLocal }]} pointerEvents="none" />
 
       <View style={{ flex: 1, flexDirection: 'row' }}>
         {lanes.map((_, laneIdx) => (
@@ -380,7 +382,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
               const anyNear = tiles.some(t => {
                 const elapsed = time.value - t.spawnTs;
                 const yNow = t.y + t.speed * elapsed;
-                return t.lane === laneIdx && yNow > hitLineY - vfxConfig.laneNearHitPx && yNow < hitLineY;
+                return t.lane === laneIdx && yNow > hitLineYLocal - vfxConfig.laneNearHitPx && yNow < hitLineYLocal;
               });
               return anyNear ? <View style={styles.laneNear} /> : null;
             })()}

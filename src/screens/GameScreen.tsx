@@ -44,7 +44,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
   const spawnInterval = useMemo(() => beatInterval, [beatInterval]);
   const time = useSharedValue(0);
   // Pattern support: if currentSong has pattern, follow it deterministically; else random with optional chords
-  const doubleChance = useRef(0.25); // 25% chance to spawn two simultaneous lanes when no pattern
+  const doubleChance = useRef(0.1); // 10% chance to spawn two simultaneous lanes when no pattern
   const patternIdxRef = useRef(0);
   const beatsSinceChordRef = useRef(10); // limit chord frequency
 
@@ -116,13 +116,13 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
       if (t - lastSpawn >= spawnInterval * 1000) {
         const startY = -100;
         const distancePx = hitLineY - startY;
-        // Global ramp: start at 1.0 beat travel, gradually decrease to minTravelBeats
+        // Global ramp: start slower at 1.5 beats travel, gently decrease to minTravelBeats
         const elapsedMs = startTs ? (t - startTs) : 0;
         const beatMs = beatInterval * 1000;
         const elapsedBeats = beatMs > 0 ? (elapsedMs / beatMs) : 0;
-        const rampK = 0.02; // ramp intensity per beat
-        const minTravelBeats = 0.65; // do not go faster than this
-        const travelBeats = Math.max(minTravelBeats, 1.0 - rampK * elapsedBeats);
+        const rampK = 0.01; // gentler ramp per beat
+        const minTravelBeats = 1.1; // do not go faster than this (more reaction time)
+        const travelBeats = Math.max(minTravelBeats, 1.5 - rampK * elapsedBeats);
         const travelMs = travelBeats * beatInterval * 1000;
         const speed = distancePx / travelMs; // px per ms
         const spawnTs = t;
@@ -130,9 +130,11 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         const spawnTiles: { lane: number }[] = [];
         const pat = currentSong?.pattern;
         if (pat && pat.length > 0) {
-          const step = pat[patternIdxRef.current % pat.length];
+          let step = pat[patternIdxRef.current % pat.length];
           patternIdxRef.current++;
           // step is an array of lanes (allowing chords)
+          // limit to max 2 lanes to keep human-playable
+          step = Array.from(new Set(step)).slice(0, 2);
           for (const ln of step) spawnTiles.push({ lane: Math.max(0, Math.min(LANES - 1, ln)) });
           beatsSinceChordRef.current = step.length > 1 ? 0 : (beatsSinceChordRef.current + 1);
         } else {
@@ -160,8 +162,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
       // advance shared time for Reanimated tiles
       const dt = t - lastTime;
       time.value = t;
-      // strict fail: if any tile passes window -> game over
-      const goodWindowMs = 120;
+      // strict fail: if any tile passes window -> game over (slightly wider window)
+      const goodWindowMs = 180;
       const liveTiles = tilesRef.current;
       for (const tile of liveTiles) {
         if (t > tile.arrivalTs + goodWindowMs) {
@@ -199,7 +201,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         const tile = prev[i];
         // Only allow tap if the tile for THIS lane is within window; ignore wrong-lane taps
         const now = timeRef.current;
-        if (tile.lane === laneIdx && Math.abs(now - tile.arrivalTs) < 160) { hitIndex = i; break; }
+        if (tile.lane === laneIdx && Math.abs(now - tile.arrivalTs) < 180) { hitIndex = i; break; }
       }
       if (hitIndex >= 0) {
         const newArr = [...prev];
@@ -207,8 +209,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         const now = timeRef.current;
         const deltaMs = Math.abs(now - tile.arrivalTs);
         let pts = 1; let label = 'GOOD';
-        if (deltaMs < 40) { pts = 3; label = 'PERFECT'; }
-        else if (deltaMs < 80) { pts = 2; label = 'GREAT'; }
+        if (deltaMs < 60) { pts = 3; label = 'PERFECT'; }
+        else if (deltaMs < 120) { pts = 2; label = 'GREAT'; }
         hitWith(pts);
         try { hitSfxRef.current?.replayAsync(); } catch {}
         laneFlashRef.current[laneIdx] = performance.now();

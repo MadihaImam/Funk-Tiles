@@ -125,6 +125,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
     patternIdxRef.current = 0;
     beatsSinceChordRef.current = 10;
     burstBeatsRef.current = 0;
+    // fewer notes when performance mode: spawn every 3 beats
+    baseBeatStepRef.current = performanceMode ? 3 : 2;
     // seed next beat index to current audio position so first spawn happens immediately
     const beatMs = beatInterval * 1000;
     const posBeats = beatMs > 0 ? Math.floor((posMsRef.current || 0) / beatMs) : 0;
@@ -285,9 +287,11 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         laneFlashRef.current[laneIdx] = performance.now();
         laneQualityTsRef.current[laneIdx] = performance.now();
         laneQualityStrengthRef.current[laneIdx] = pts;
-        const ft = { id: nextFloatId.current++, lane: laneIdx, y: hitLineYLocal - 20, label };
-        setFloatTexts(arr => [...arr, ft]);
-        setTimeout(() => setFloatTexts(arr => arr.filter(x => x.id !== ft.id)), 500);
+        if (!performanceMode) {
+          const ft = { id: nextFloatId.current++, lane: laneIdx, y: hitLineYLocal - 20, label };
+          setFloatTexts(arr => [...arr, ft]);
+          setTimeout(() => setFloatTexts(arr => arr.filter(x => x.id !== ft.id)), 500);
+        }
         if (!performanceMode && label === 'PERFECT') {
           // spawn simple particles near the hit line in this lane
           const burst = Array.from({ length: 6 }).map(() => ({
@@ -498,7 +502,7 @@ const styles = StyleSheet.create({
   tile: { position: 'absolute', height: 200, borderRadius: 8, backgroundColor: '#000000', opacity: 0.98, borderWidth: 2, borderColor: '#ffffff' },
   // stronger glow on tiles
   // @ts-ignore shadow props iOS/Android
-  tileGlow: { shadowColor: colors.neonPurple, shadowRadius: 10, shadowOpacity: 0.35, shadowOffset: { width: 0, height: 0 } },
+  tileGlow: {},
   holdTail: { backgroundColor: '#0a0a0a', borderRadius: 10, opacity: 0.9, marginHorizontal: 0, marginBottom: 6 },
   hitLine: { position: 'absolute', left: 0, right: 0, height: 4, backgroundColor: '#2a2140', zIndex: 1 },
   laneFlash: { ...StyleSheet.absoluteFillObject as any, backgroundColor: '#ffffff20' },

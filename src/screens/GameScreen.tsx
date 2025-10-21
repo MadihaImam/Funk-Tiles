@@ -40,11 +40,11 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
 
   const diffConf = useMemo(() => currentSong?.difficulties[difficulty], [currentSong, difficulty]);
   const beatInterval = useMemo(() => currentSong ? 60 / currentSong.bpm : 0.5, [currentSong]);
-  // Spawn cadence: one beat between spawns
-  const spawnInterval = useMemo(() => beatInterval, [beatInterval]);
+  // Spawn cadence: one tile every 2 beats for lower density
+  const spawnInterval = useMemo(() => beatInterval * 2, [beatInterval]);
   const time = useSharedValue(0);
   // Pattern support: if currentSong has pattern, follow it deterministically; else random with optional chords
-  const doubleChance = useRef(0.1); // 10% chance to spawn two simultaneous lanes when no pattern
+  const doubleChance = useRef(0.05); // 5% chance to spawn two simultaneous lanes when no pattern
   const patternIdxRef = useRef(0);
   const beatsSinceChordRef = useRef(10); // limit chord frequency
 
@@ -116,13 +116,13 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
       if (t - lastSpawn >= spawnInterval * 1000) {
         const startY = -100;
         const distancePx = hitLineY - startY;
-        // Global ramp: start slower at 1.5 beats travel, gently decrease to minTravelBeats
+        // Global ramp: start slower at 2.0 beats travel, gently decrease to minTravelBeats
         const elapsedMs = startTs ? (t - startTs) : 0;
         const beatMs = beatInterval * 1000;
         const elapsedBeats = beatMs > 0 ? (elapsedMs / beatMs) : 0;
-        const rampK = 0.01; // gentler ramp per beat
-        const minTravelBeats = 1.1; // do not go faster than this (more reaction time)
-        const travelBeats = Math.max(minTravelBeats, 1.5 - rampK * elapsedBeats);
+        const rampK = 0.004; // even gentler ramp per beat
+        const minTravelBeats = 1.4; // keep more reaction time
+        const travelBeats = Math.max(minTravelBeats, 2.0 - rampK * elapsedBeats);
         const travelMs = travelBeats * beatInterval * 1000;
         const speed = distancePx / travelMs; // px per ms
         const spawnTs = t;
@@ -139,7 +139,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
           beatsSinceChordRef.current = step.length > 1 ? 0 : (beatsSinceChordRef.current + 1);
         } else {
           // fallback: random single or double chord
-          const allowChord = beatsSinceChordRef.current >= 3; // at most one chord every 4 beats
+          const allowChord = beatsSinceChordRef.current >= 5; // at most one chord roughly every 6 beats
           if (allowChord && Math.random() < doubleChance.current) {
             const first = Math.floor(Math.random() * LANES);
             let second = Math.floor(Math.random() * LANES);

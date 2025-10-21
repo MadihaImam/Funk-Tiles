@@ -109,6 +109,10 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
   // spawner based on BPM & difficulty (Magic Tiles style: tiles arrive on-beat)
   useEffect(() => {
     if (!startTs || !currentSong || !diffConf) return;
+    // reset pattern and burst counters at (re)start
+    patternIdxRef.current = 0;
+    beatsSinceChordRef.current = 10;
+    burstBeatsRef.current = 0;
     let lastSpawn = startTs;
     let lastTime = startTs;
     let lastUpdate = startTs;
@@ -117,8 +121,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
       if (isPaused) { rafRef.current = requestAnimationFrame(tick); return; }
       // compute current interval (burst vs base)
       const currentIntervalMs = (burstBeatsRef.current > 0 ? beatInterval : spawnInterval) * 1000;
-      // spawn
-      if (t - lastSpawn >= currentIntervalMs) {
+      // spawn (handle multiple intervals if a frame stutters)
+      while (t - lastSpawn >= currentIntervalMs) {
         const startY = -100;
         const distancePx = hitLineY - startY;
         // Global ramp: start slower at 2.0 beats travel, gently decrease to minTravelBeats
@@ -154,7 +158,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
           } else {
             // either a tap or an occasional hold note (single-lane only)
             const ln = Math.floor(Math.random() * LANES);
-            const isHold = Math.random() < 0.15; // 15% chance of a hold note
+            const isHold = Math.random() < 0.05; // 5% chance of a hold note
             const holdMs = isHold ? (beatMs * (1.0 + Math.random() * 0.8)) : 0; // 1.0..1.8 beats
             spawnTiles.push({ lane: ln, holdMs });
             beatsSinceChordRef.current += 1;
@@ -172,15 +176,18 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         }
         // decrement burst if active
         if (burstBeatsRef.current > 0) burstBeatsRef.current -= 1;
-        lastSpawn = t;
+        lastSpawn += currentIntervalMs;
       }
       // advance shared time for Reanimated tiles
       const dt = t - lastTime;
       time.value = t;
       // strict fail: if any tile passes window or hold broken -> game over (slightly wider window)
-      const goodWindowMs = 180;
+      const goodWindowMs = 220;
+      // small grace at the very start so first tiles are visible
+      const elapsedFromStart = startTs ? (t - startTs) : 0;
+      const failChecksActive = elapsedFromStart > 700;
       const liveTiles = tilesRef.current;
-      for (const tile of liveTiles) {
+      if (failChecksActive) for (const tile of liveTiles) {
         if (tile.holdMs > 0) {
           const laneHeld = heldLanesRef.current.has(tile.lane);
           // must be holding shortly after arrival
@@ -232,7 +239,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
 
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [startTs, diffConf, spawnInterval, isPaused, ended, tiles.length]);
+  }, [startTs, diffConf, spawnInterval, isPaused, ended]);
 
   // cleanup audio
   useEffect(() => {
@@ -283,8 +290,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         }
         return newArr;
       } else {
-        // strict fail on wrong-lane/off-time tap
-        (async () => { try { await missSfxRef.current?.replayAsync(); } catch {}; await endGame(); })();
+        // wrong-lane/off-time tap -> ignore (no instant fail)
         return prev;
       }
     });

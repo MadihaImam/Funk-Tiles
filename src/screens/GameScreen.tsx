@@ -1,6 +1,3 @@
-  // Compute hit line Y with a floor so it's always visible on small viewports
-  const winHeight = Dimensions.get('window').height;
-  const hitLineYLocal = Math.max(220, winHeight - 140);
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Dimensions, Pressable, Alert, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -30,6 +27,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
   const nextTileId = useRef(1);
   const [ended, setEnded] = useState(false);
   const timeRef = useRef<number>(0);
+  // Robust hit line position based on current window height
+  const hitLineYLocal = Math.max(220, Dimensions.get('window').height - 140);
   const laneFlashRef = useRef<number[]>([0, 0, 0, 0]); // timestamps of last hit per lane
   const [floatTexts, setFloatTexts] = useState<{ id: number; lane: number; y: number; label: string }[]>([]);
   const [particles, setParticles] = useState<{ id: number; lane: number; y: number; x: number; born: number; dx: number }[]>([]);
@@ -44,6 +43,9 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
   const spawnedCountRef = useRef<number>(0);
   const playbackStartedRef = useRef<boolean>(false);
   const firstArrivalTsRef = useRef<number | null>(null);
+  const posMsRef = useRef<number>(0);
+  const nextBeatIdxRef = useRef<number>(0);
+  const baseBeatStepRef = useRef<number>(2); // spawn every 2 beats by default
 
   const diffConf = useMemo(() => currentSong?.difficulties[difficulty], [currentSong, difficulty]);
   const beatInterval = useMemo(() => currentSong ? 60 / currentSong.bpm : 0.5, [currentSong]);
@@ -80,7 +82,10 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         audioRef.current = sound;
         // if audio starts later due to permissions, gameplay continues regardless
         sound.setOnPlaybackStatusUpdate((s: any) => {
-          if (s?.isLoaded && s.positionMillis > 0) playbackStartedRef.current = true;
+          if (s?.isLoaded) {
+            posMsRef.current = s.positionMillis ?? posMsRef.current;
+            if (s.positionMillis > 0) playbackStartedRef.current = true;
+          }
           if (s?.didJustFinish && mounted && playbackStartedRef.current) {
             setEnded(true);
           }
@@ -112,35 +117,37 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
     return () => { (async () => { try { await hitSfxRef.current?.unloadAsync(); } catch {}; try { await missSfxRef.current?.unloadAsync(); } catch {} })(); };
   }, []);
 
-  // spawner based on BPM & difficulty (Magic Tiles style: tiles arrive on-beat)
+  // spawner: audio-locked beat syncing (Magic Tiles style: tiles arrive on-beat)
   useEffect(() => {
     if (!startTs || !currentSong || !diffConf) return;
     // reset pattern and burst counters at (re)start
     patternIdxRef.current = 0;
     beatsSinceChordRef.current = 10;
     burstBeatsRef.current = 0;
-    // spawn immediately on first frame by backdating the last spawn
-    let lastSpawn = startTs - ((burstBeatsRef.current > 0 ? beatInterval : spawnInterval) * 1000);
+    // seed next beat index to current audio position so first spawn happens immediately
+    const beatMs = beatInterval * 1000;
+    const posBeats = beatMs > 0 ? Math.floor((posMsRef.current || 0) / beatMs) : 0;
+    nextBeatIdxRef.current = posBeats; // allow immediate spawn
     let lastTime = startTs;
     let lastUpdate = startTs;
 
     const tick = (t: number) => {
       if (isPaused) { rafRef.current = requestAnimationFrame(tick); return; }
-      // compute current interval (burst vs base)
-      const currentIntervalMs = (burstBeatsRef.current > 0 ? beatInterval : spawnInterval) * 1000;
-      // spawn (handle multiple intervals if a frame stutters)
-      while (t - lastSpawn >= currentIntervalMs) {
+      // audio-locked beat spawning
+      const beatMsLocal = beatInterval * 1000;
+      const posMs = posMsRef.current;
+      const posBeatsNow = beatMsLocal > 0 ? Math.floor(posMs / beatMsLocal) : 0;
+      const currentStep = burstBeatsRef.current > 0 ? 1 : baseBeatStepRef.current;
+      while (nextBeatIdxRef.current <= posBeatsNow) {
         const startY = -100;
         const distancePx = Math.max(220, Dimensions.get('window').height - 140) - startY;
-        // Global ramp: start slower at 2.0 beats travel, gently decrease to minTravelBeats
-        const elapsedMs = startTs ? (t - startTs) : 0;
-        const beatMs = beatInterval * 1000;
-        const elapsedBeats = beatMs > 0 ? (elapsedMs / beatMs) : 0;
-        const rampK = 0.004; // even gentler ramp per beat
-        const minTravelBeats = 1.4; // keep more reaction time
+        // Global ramp based on elapsed beats
+        const elapsedBeats = beatMsLocal > 0 ? ((t - (startTs || t)) / beatMsLocal) : 0;
+        const rampK = 0.004;
+        const minTravelBeats = 1.4;
         const travelBeats = Math.max(minTravelBeats, 2.0 - rampK * elapsedBeats);
-        const travelMs = travelBeats * beatInterval * 1000;
-        const speed = distancePx / travelMs; // px per ms
+        const travelMs = travelBeats * beatMsLocal;
+        const speed = distancePx / travelMs;
         const spawnTs = t;
         const arrivalTs = spawnTs + travelMs;
         const spawnTiles: { lane: number; holdMs?: number }[] = [];
@@ -148,14 +155,11 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         if (pat && pat.length > 0) {
           let step = pat[patternIdxRef.current % pat.length];
           patternIdxRef.current++;
-          // step is an array of lanes (allowing chords)
-          // limit to max 2 lanes to keep human-playable
           step = Array.from(new Set(step)).slice(0, 2);
           for (const ln of step) spawnTiles.push({ lane: Math.max(0, Math.min(LANES - 1, ln)), holdMs: 0 });
           beatsSinceChordRef.current = step.length > 1 ? 0 : (beatsSinceChordRef.current + 1);
         } else {
-          // fallback: random single or double chord
-          const allowChord = beatsSinceChordRef.current >= 5; // at most one chord roughly every 6 beats
+          const allowChord = beatsSinceChordRef.current >= 5;
           if (allowChord && Math.random() < doubleChance.current) {
             const first = Math.floor(Math.random() * LANES);
             let second = Math.floor(Math.random() * LANES);
@@ -163,10 +167,10 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
             spawnTiles.push({ lane: first, holdMs: 0 }, { lane: second, holdMs: 0 });
             beatsSinceChordRef.current = 0;
           } else {
-            // either a tap or an occasional hold note (single-lane only)
             const ln = Math.floor(Math.random() * LANES);
-            const isHold = elapsedBeats >= 8 ? (Math.random() < 0.05) : false; // no holds in first 8 beats
-            const holdMs = isHold ? (beatMs * (1.0 + Math.random() * 0.8)) : 0; // 1.0..1.8 beats
+            // no holds in first 8 beats of gameplay
+            const isHold = elapsedBeats >= 8 ? (Math.random() < 0.05) : false;
+            const holdMs = isHold ? (beatMsLocal * (1.0 + Math.random() * 0.8)) : 0;
             spawnTiles.push({ lane: ln, holdMs });
             beatsSinceChordRef.current += 1;
           }
@@ -179,13 +183,12 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
           spawnedCountRef.current += spawnTiles.length;
           if (firstArrivalTsRef.current == null) firstArrivalTsRef.current = arrivalTs;
         }
-        // randomly start a short burst for quick sequences when not already in burst
+        // optionally start a short burst
         if (burstBeatsRef.current <= 0 && Math.random() < 0.1) {
-          burstBeatsRef.current = 3; // 3 beats of faster taps
+          burstBeatsRef.current = 3;
         }
-        // decrement burst if active
         if (burstBeatsRef.current > 0) burstBeatsRef.current -= 1;
-        lastSpawn += currentIntervalMs;
+        nextBeatIdxRef.current += currentStep;
       }
       // advance shared time for Reanimated tiles
       const dt = t - lastTime;
@@ -247,7 +250,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
 
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [startTs, diffConf, spawnInterval, isPaused, ended]);
+  }, [startTs, diffConf, beatInterval, isPaused, ended]);
 
   // cleanup audio
   useEffect(() => {
@@ -454,7 +457,7 @@ const styles = StyleSheet.create({
   // @ts-ignore shadow props iOS/Android
   tileGlow: { shadowColor: colors.neonPurple, shadowRadius: 10, shadowOpacity: 0.35, shadowOffset: { width: 0, height: 0 } },
   holdTail: { backgroundColor: '#0a0a0a', borderRadius: 10, opacity: 0.9, marginHorizontal: 0, marginBottom: 6 },
-  hitLine: { position: 'absolute', left: 0, right: 0, top: hitLineY, height: 4, backgroundColor: '#2a2140', zIndex: 1 },
+  hitLine: { position: 'absolute', left: 0, right: 0, height: 4, backgroundColor: '#2a2140', zIndex: 1 },
   laneFlash: { ...StyleSheet.absoluteFillObject as any, backgroundColor: '#ffffff20' },
   laneNear: { ...StyleSheet.absoluteFillObject as any, backgroundColor: '#00e5ff10' },
   laneQuality: { ...StyleSheet.absoluteFillObject as any, backgroundColor: '#9b5cff20' },

@@ -355,6 +355,11 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
   }, [onTapLane]);
 
   const lanes = new Array(LANES).fill(0);
+  const tilesByLane = useMemo(() => {
+    const map: Record<number, Tile[]> = { 0: [], 1: [], 2: [], 3: [] };
+    for (const t of tiles) map[t.lane]?.push(t);
+    return map;
+  }, [tiles]);
   const now = timeRef.current;
   const beatMs = (beatInterval || 0.5) * 1000;
   const phase = startTs ? ((now - startTs) % beatMs) / beatMs : 0;
@@ -400,8 +405,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
               if (opacity <= 0) return null;
               return <View style={[styles.laneQuality, { opacity }]} />;
             })()}
-            {tiles.filter(t => t.lane === laneIdx).map(tile => (
-              <TileView key={tile.id} tile={tile} sharedTime={time} laneWidth={laneWidthLocal} />
+            {tilesByLane[laneIdx].map(tile => (
+              <TileView key={tile.id} tile={tile} sharedTime={time} laneWidth={laneWidthLocal} performanceMode={performanceMode} />
             ))}
             {particles.filter(p => p.lane === laneIdx).map(p => (
               <ParticleView key={p.id} p={p} sharedTime={time.value} />
@@ -452,7 +457,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
 }
 
 // Child component so hooks are used safely per tile
-function TileView({ tile, sharedTime, laneWidth }: { tile: Tile; sharedTime: Animated.SharedValue<number>; laneWidth: number }) {
+function TileView({ tile, sharedTime, laneWidth, performanceMode }: { tile: Tile; sharedTime: Animated.SharedValue<number>; laneWidth: number; performanceMode: boolean }) {
   const aStyle = useAnimatedStyle(() => {
     const elapsed = sharedTime.value - tile.spawnTs;
     const yNow = tile.y + tile.speed * elapsed;
@@ -465,7 +470,7 @@ function TileView({ tile, sharedTime, laneWidth }: { tile: Tile; sharedTime: Ani
       {tailPx > 0 && (
         <View style={[styles.holdTail, { height: Math.max(0, tailPx) }]} />
       )}
-      <View style={[styles.tile, styles.tileGlow]} />
+      <View style={[styles.tile, !performanceMode && styles.tileGlow]} />
     </Animated.View>
   );
 }

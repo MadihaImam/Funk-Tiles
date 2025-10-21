@@ -257,7 +257,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
     return () => { (async () => { try { await audioRef.current?.unloadAsync(); } catch {} })(); };
   }, []);
 
-  const onTapLane = useCallback((laneIdx: number) => {
+  const onTapLane = useCallback((laneIdx: number, touchY?: number) => {
     // find nearest tile in the lane close to hit line
     setTiles(prev => {
       let hitIndex = -1;
@@ -265,7 +265,11 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         const tile = prev[i];
         // Only allow tap if the tile for THIS lane is within window; ignore wrong-lane taps
         const now = timeRef.current;
-        if (tile.lane === laneIdx && tile.holdMs === 0 && Math.abs(now - tile.arrivalTs) < 180) { hitIndex = i; break; }
+        if (tile.lane !== laneIdx || tile.holdMs !== 0) continue;
+        // time-gated
+        if (Math.abs(now - tile.arrivalTs) >= 180) continue;
+        // pressing area is the whole lane; no vertical overlap check required
+        hitIndex = i; break;
       }
       if (hitIndex >= 0) {
         const newArr = [...prev];
@@ -308,14 +312,15 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
   }, [endGame]);
 
   // Multi-finger: mark holds by lane on press in/out
-  const onLanePressIn = useCallback((laneIdx: number) => {
+  const onLanePressIn = useCallback((laneIdx: number, touchY?: number) => {
     heldLanesRef.current.add(laneIdx);
     // if a hold tile is arriving now, mark as started holding
     const now = timeRef.current;
     for (const tile of tilesRef.current) {
-      if (tile.lane === laneIdx && tile.holdMs > 0 && Math.abs(now - tile.arrivalTs) < 180) {
-        holdingTileIdsRef.current.add(tile.id);
-      }
+      if (tile.lane !== laneIdx || tile.holdMs <= 0) continue;
+      if (Math.abs(now - tile.arrivalTs) >= 180) continue;
+      // pressing area is the whole lane; no vertical overlap check required
+      holdingTileIdsRef.current.add(tile.id);
     }
   }, []);
 
@@ -403,23 +408,25 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
             ))}
           </View>
         ))}
-        {/* Central multi-touch overlay */}
+        {/* Central multi-touch overlay: maps finger positions to lanes and only hits if inside tile rect */}
         <View
           style={StyleSheet.absoluteFill}
           onTouchStart={(e) => {
             const touches = e.nativeEvent.touches as any[];
             for (const t of touches) {
               const x = (t.locationX ?? 0);
+              const y = (t.locationY ?? 0);
               const lane = Math.max(0, Math.min(LANES - 1, Math.floor(x / laneWidthLocal)));
-              onLanePressIn(lane);
-              // Attempt tap for non-hold tiles arriving now in that lane
-              onTapLane(lane);
+              onLanePressIn(lane, y);
+              // Attempt tap for non-hold tiles arriving now in that lane only if inside tile rect
+              onTapLane(lane, y);
             }
           }}
           onTouchEnd={(e) => {
             const touches = (e.nativeEvent.changedTouches as any[]) || [];
             for (const t of touches) {
               const x = (t.locationX ?? 0);
+              const y = (t.locationY ?? 0);
               const lane = Math.max(0, Math.min(LANES - 1, Math.floor(x / laneWidthLocal)));
               onLanePressOut(lane);
             }
@@ -428,6 +435,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
             const touches = (e.nativeEvent.changedTouches as any[]) || [];
             for (const t of touches) {
               const x = (t.locationX ?? 0);
+              const y = (t.locationY ?? 0);
               const lane = Math.max(0, Math.min(LANES - 1, Math.floor(x / laneWidthLocal)));
               onLanePressOut(lane);
             }

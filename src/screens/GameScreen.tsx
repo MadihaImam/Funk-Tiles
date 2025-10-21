@@ -126,8 +126,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
     patternIdxRef.current = 0;
     beatsSinceChordRef.current = 10;
     burstBeatsRef.current = 0;
-    // fewer notes when performance mode: spawn every 4 beats (native keeps 2)
-    baseBeatStepRef.current = performanceMode ? 4 : 2;
+    // fewer notes when performance mode: spawn every 5 beats (native keeps 2)
+    baseBeatStepRef.current = performanceMode ? 5 : 2;
     // seed next beat index to current audio position so first spawn happens immediately
     const beatMs = beatInterval * 1000;
     const posBeats = beatMs > 0 ? Math.floor((posMsRef.current || 0) / beatMs) : 0;
@@ -172,17 +172,17 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
             beatsSinceChordRef.current = 0;
           } else {
             const ln = Math.floor(Math.random() * LANES);
-            // no holds in first 8 beats of gameplay
-            const isHold = elapsedBeats >= 8 ? (Math.random() < 0.05) : false;
+            // no holds in first 8 beats of gameplay; disable holds entirely on web for smoothness
+            const isHold = performanceMode ? false : (elapsedBeats >= 8 ? (Math.random() < 0.05) : false);
             const holdMs = isHold ? (beatMsLocal * (1.0 + Math.random() * 0.8)) : 0;
             spawnTiles.push({ lane: ln, holdMs });
             beatsSinceChordRef.current += 1;
           }
         }
         if (spawnTiles.length > 0) {
-          // Cap simultaneous tiles for smoothness, stricter on web
+          // Cap simultaneous tiles for smoothness, ultra-strict on web
           const maxPerLane = performanceMode ? 1 : 3;
-          const maxTotal = performanceMode ? 12 : 24;
+          const maxTotal = performanceMode ? 8 : 24;
           const current = tilesRef.current;
           const perLaneCount: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0 };
           for (const t of current) perLaneCount[t.lane] = (perLaneCount[t.lane] ?? 0) + 1;
@@ -546,7 +546,7 @@ const styles = StyleSheet.create({
   discGroove: { position: 'absolute', width: 70, height: 70, borderRadius: 35, borderWidth: 2, borderColor: '#202038' },
   discCenter: { width: 16, height: 16, borderRadius: 8, backgroundColor: '#9b5cff' },
   lane: { flex: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#151532', justifyContent: 'flex-start', overflow: 'hidden' },
-  tile: { position: 'absolute', height: 200, borderRadius: 8, backgroundColor: '#000000', opacity: 0.98, borderWidth: 2, borderColor: '#ffffff' },
+  tile: { position: 'absolute', height: 160, borderRadius: 8, backgroundColor: '#000000', opacity: 0.98, borderWidth: 2, borderColor: '#ffffff' },
   // stronger glow on tiles
   // @ts-ignore shadow props iOS/Android
   tileGlow: {},

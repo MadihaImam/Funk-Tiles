@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Dimensions, Pressable, Alert, Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { useSharedValue, useAnimatedStyle } from 'react-native-reanimated';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../App';
@@ -15,7 +16,7 @@ const laneWidth = width / LANES;
 const hitLineY = height - 140; // target line
 
 // Tile structure
-interface Tile { id: number; lane: number; y: number; speed: number; time: number; }
+interface Tile { id: number; lane: number; y: number; speed: number; spawnTs: number; arrivalTs: number; }
 
 export default function GameScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Game'>) {
   const { currentSong, difficulty, hit, hitWith, resetRun, isPaused, pause, resume } = useGameStore();
@@ -39,7 +40,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
 
   const diffConf = useMemo(() => currentSong?.difficulties[difficulty], [currentSong, difficulty]);
   const beatInterval = useMemo(() => currentSong ? 60 / currentSong.bpm : 0.5, [currentSong]);
-  const spawnInterval = useMemo(() => diffConf ? beatInterval / (diffConf.density || 1) : beatInterval, [beatInterval, diffConf]);
+  // spawn every beat divided by density
+  const spawnInterval = useMemo(() => diffConf ? (beatInterval / Math.max(0.5, diffConf.density || 1)) : beatInterval, [beatInterval, diffConf]);
   const time = useSharedValue(0);
 
   // keep a live ref of tiles to avoid stale closure in RAF loop
@@ -91,7 +93,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
     return () => { (async () => { try { await hitSfxRef.current?.unloadAsync(); } catch {}; try { await missSfxRef.current?.unloadAsync(); } catch {} })(); };
   }, []);
 
-  // spawner based on BPM & difficulty
+  // spawner based on BPM & difficulty (Magic Tiles style: tiles arrive on-beat)
   useEffect(() => {
     if (!startTs || !currentSong || !diffConf) return;
     let lastSpawn = startTs;
@@ -103,19 +105,26 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
       // spawn
       if (t - lastSpawn >= spawnInterval * 1000) {
         const lane = Math.floor(Math.random() * LANES);
-        const speed = 0.15 * (diffConf.speed || 1); // px per ms
-        setTiles(prev => [...prev, { id: nextTileId.current++, lane, y: -80, speed, time: t }]);
+        // compute speed so the tile reaches hitLine exactly after travelMs
+        const startY = -100;
+        const distancePx = hitLineY - startY;
+        const travelBeats = 1.0 / Math.max(0.75, (diffConf.density || 1)); // faster density -> shorter travel
+        const travelMs = travelBeats * beatInterval * 1000;
+        const speed = distancePx / travelMs; // px per ms
+        const spawnTs = t;
+        const arrivalTs = spawnTs + travelMs;
+        setTiles(prev => [...prev, { id: nextTileId.current++, lane, y: startY, speed, spawnTs, arrivalTs }]);
         lastSpawn = t;
       }
       // advance shared time for Reanimated tiles
       const dt = t - lastTime;
       let gameOver = false;
       time.value = t;
-      // compute misses from derived positions without committing React state updates
+      // compute misses time-based: if past arrival by GOOD window -> miss
+      const goodWindowMs = 120;
       const liveTiles = tilesRef.current;
       for (const tile of liveTiles) {
-        const yNow = tile.y + tile.speed * (t - tile.time);
-        if (yNow > hitLineY + 70) { gameOver = true; break; }
+        if (t > tile.arrivalTs + goodWindowMs) { gameOver = true; break; }
       }
 
       if (gameOver) {
@@ -150,15 +159,18 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
       let hitIndex = -1;
       for (let i = 0; i < prev.length; i++) {
         const tile = prev[i];
-        if (tile.lane === laneIdx && Math.abs(tile.y - hitLineY) < 60) { hitIndex = i; break; }
+        // time-based proximity
+        const now = timeRef.current;
+        if (tile.lane === laneIdx && Math.abs(now - tile.arrivalTs) < 140) { hitIndex = i; break; }
       }
       if (hitIndex >= 0) {
         const newArr = [...prev];
         const tile = newArr.splice(hitIndex, 1)[0];
-        const delta = Math.abs(tile.y - hitLineY);
+        const now = timeRef.current;
+        const deltaMs = Math.abs(now - tile.arrivalTs);
         let pts = 1; let label = 'GOOD';
-        if (delta < 20) { pts = 3; label = 'PERFECT'; }
-        else if (delta < 40) { pts = 2; label = 'GREAT'; }
+        if (deltaMs < 40) { pts = 3; label = 'PERFECT'; }
+        else if (deltaMs < 80) { pts = 2; label = 'GREAT'; }
         hitWith(pts);
         try { hitSfxRef.current?.replayAsync(); } catch {}
         laneFlashRef.current[laneIdx] = performance.now();
@@ -225,7 +237,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
   const pulseOpacity = 0.45 * Math.exp(-6 * phase); // smooth exponential decay flash per beat
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <View style={styles.topBar}>
         <Text style={styles.topTitle}>{currentSong?.title ?? ''}</Text>
         <View style={{ flexDirection: 'row', gap: 16 }}>
@@ -244,10 +256,15 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
             {now - laneFlashRef.current[laneIdx] < 120 && (
               <View style={styles.laneFlash} />
             )}
-            {/* Near-hit highlight */}
-            {tiles.some(t => t.lane === laneIdx && t.y > hitLineY - vfxConfig.laneNearHitPx && t.y < hitLineY) && (
-              <View style={styles.laneNear} />
-            )}
+            {/* Near-hit highlight (time-based position) */}
+            {(() => {
+              const anyNear = tiles.some(t => {
+                const elapsed = time.value - t.spawnTs;
+                const yNow = t.y + t.speed * elapsed;
+                return t.lane === laneIdx && yNow > hitLineY - vfxConfig.laneNearHitPx && yNow < hitLineY;
+              });
+              return anyNear ? <View style={styles.laneNear} /> : null;
+            })()}
             {/* Quality-based glow with decay */}
             {(() => {
               const age = now - laneQualityTsRef.current[laneIdx];
@@ -257,33 +274,42 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
               if (opacity <= 0) return null;
               return <View style={[styles.laneQuality, { opacity }]} />;
             })()}
-            {tiles.filter(t => t.lane === laneIdx).map(tile => {
-              const aStyle = useAnimatedStyle(() => ({ transform: [{ translateY: tile.y + tile.speed * (time.value - tile.time) }] }));
-              return (
-                <Animated.View key={tile.id} style={[styles.tile, styles.tileGlow, aStyle, { left: 8, right: 8 }]} />
-              );
-            })}
-            {particles.filter(p => p.lane === laneIdx).map(p => {
-              const pStyle = useAnimatedStyle(() => {
-                const dt = time.value - p.born;
-                const alpha = Math.max(0, 1 - dt / 400);
-                const driftX = p.dx * dt * 0.05;
-                return {
-                  opacity: alpha,
-                  transform: [{ translateY: p.y }, { translateX: driftX }],
-                } as any;
-              });
-              return (
-                <Animated.View key={p.id} style={[styles.particle, pStyle as any, { left: p.x }]} />
-              );
-            })}
+            {tiles.filter(t => t.lane === laneIdx).map(tile => (
+              <TileView key={tile.id} tile={tile} sharedTime={time.value} />
+            ))}
+            {particles.filter(p => p.lane === laneIdx).map(p => (
+              <ParticleView key={p.id} p={p} sharedTime={time.value} />
+            ))}
           </Pressable>
         ))}
         {/* BPM pulse overlay */}
         <View pointerEvents="none" style={[styles.pulseOverlay, { opacity: pulseOpacity }]} />
       </View>
-    </View>
+    </SafeAreaView>
   );
+}
+
+// Child component so hooks are used safely per tile
+function TileView({ tile, sharedTime }: { tile: Tile; sharedTime: number }) {
+  const aStyle = useAnimatedStyle(() => {
+    const elapsed = sharedTime - tile.spawnTs;
+    const yNow = tile.y + tile.speed * elapsed;
+    return { transform: [{ translateY: yNow }]} as any;
+  });
+  return <Animated.View style={[styles.tile, styles.tileGlow, aStyle, { left: 8, right: 8 }]} />;
+}
+
+function ParticleView({ p, sharedTime }: { p: { id: number; lane: number; y: number; x: number; born: number; dx: number }; sharedTime: number }) {
+  const pStyle = useAnimatedStyle(() => {
+    const dt = sharedTime - p.born;
+    const alpha = Math.max(0, 1 - dt / 400);
+    const driftX = p.dx * dt * 0.05;
+    return {
+      opacity: alpha,
+      transform: [{ translateY: p.y }, { translateX: driftX }],
+    } as any;
+  });
+  return <Animated.View style={[styles.particle, pStyle as any, { left: p.x }]} />;
 }
 
 const styles = StyleSheet.create({

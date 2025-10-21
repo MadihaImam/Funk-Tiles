@@ -53,4 +53,26 @@ export const songs: Song[] = [
       hard: { speed: 1.4, density: 1.5 },
     },
   },
+  {
+    title: 'Dia Delícia',
+    artist: 'MCs FunkMix',
+    audio: 'assets/audio/dia_delicia.mp3',
+    bpm: 110,
+    difficulties: {
+      easy: { speed: 0.9, density: 0.8 },
+      normal: { speed: 1.0, density: 1.0 },
+      hard: { speed: 1.2, density: 1.2 },
+    },
+  },
+  {
+    title: 'Mente Má',
+    artist: 'MC Magalhães',
+    audio: 'assets/audio/mente_ma.mp3',
+    bpm: 114,
+    difficulties: {
+      easy: { speed: 0.95, density: 0.85 },
+      normal: { speed: 1.05, density: 1.0 },
+      hard: { speed: 1.25, density: 1.3 },
+    },
+  },
 ];

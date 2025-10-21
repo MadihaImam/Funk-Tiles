@@ -12,7 +12,6 @@ import { appAudioConfig, vfxConfig } from '@/data/config';
 
 const LANES = 4;
 const { height, width } = Dimensions.get('window');
-const laneWidth = width / LANES;
 
 // Tile structure
 interface Tile { id: number; lane: number; y: number; speed: number; spawnTs: number; arrivalTs: number; holdMs: number; endTs: number; }
@@ -29,6 +28,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
   const timeRef = useRef<number>(0);
   // Robust hit line position based on current window height
   const hitLineYLocal = Math.max(220, Dimensions.get('window').height - 140);
+  const laneWidthLocal = Dimensions.get('window').width / LANES;
   const laneFlashRef = useRef<number[]>([0, 0, 0, 0]); // timestamps of last hit per lane
   const [floatTexts, setFloatTexts] = useState<{ id: number; lane: number; y: number; label: string }[]>([]);
   const [particles, setParticles] = useState<{ id: number; lane: number; y: number; x: number; born: number; dx: number }[]>([]);
@@ -289,7 +289,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
             id: nextParticleId.current++,
             lane: laneIdx,
             y: hitLineYLocal - 20 - Math.random() * 30,
-            x: Math.random() * (laneWidth - 24) + 12,
+            x: Math.random() * (laneWidthLocal - 24) + 12,
             born: performance.now(),
             dx: Math.random() < 0.5 ? -1 : 1,
           }));
@@ -371,7 +371,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         {lanes.map((_, laneIdx) => (
           <Pressable
             key={laneIdx}
-            style={[styles.lane, { width: laneWidth }]}
+            style={[styles.lane, { width: laneWidthLocal }]}
             onPress={() => onTapLane(laneIdx)}
             onPressIn={() => onLanePressIn(laneIdx)}
             onPressOut={() => onLanePressOut(laneIdx)}
@@ -399,7 +399,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
               return <View style={[styles.laneQuality, { opacity }]} />;
             })()}
             {tiles.filter(t => t.lane === laneIdx).map(tile => (
-              <TileView key={tile.id} tile={tile} sharedTime={time} />
+              <TileView key={tile.id} tile={tile} sharedTime={time} laneWidth={laneWidthLocal} />
             ))}
             {particles.filter(p => p.lane === laneIdx).map(p => (
               <ParticleView key={p.id} p={p} sharedTime={time.value} />
@@ -414,7 +414,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
 }
 
 // Child component so hooks are used safely per tile
-function TileView({ tile, sharedTime }: { tile: Tile; sharedTime: Animated.SharedValue<number> }) {
+function TileView({ tile, sharedTime, laneWidth }: { tile: Tile; sharedTime: Animated.SharedValue<number>; laneWidth: number }) {
   const aStyle = useAnimatedStyle(() => {
     const elapsed = sharedTime.value - tile.spawnTs;
     const yNow = tile.y + tile.speed * elapsed;
@@ -423,7 +423,7 @@ function TileView({ tile, sharedTime }: { tile: Tile; sharedTime: Animated.Share
   // For hold notes, draw a tail to indicate duration
   const tailPx = tile.holdMs > 0 ? tile.speed * tile.holdMs : 0;
   return (
-    <Animated.View style={[aStyle, { position: 'absolute', left: 8, right: 8 }]}>
+    <Animated.View style={[aStyle, { position: 'absolute', left: 8, width: Math.max(0, laneWidth - 16) }]}>
       {tailPx > 0 && (
         <View style={[styles.holdTail, { height: Math.max(0, tailPx) }]} />
       )}

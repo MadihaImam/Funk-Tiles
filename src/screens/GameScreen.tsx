@@ -18,6 +18,7 @@ interface Tile { id: number; lane: number; y: number; speed: number; spawnTs: nu
 
 export default function GameScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Game'>) {
   const { currentSong, difficulty, hit, hitWith, resetRun, isPaused, pause, resume } = useGameStore();
+  const performanceMode = true; // disable heavy visuals for smoother gameplay
   const [tiles, setTiles] = useState<Tile[]>([]);
   const tilesRef = useRef<Tile[]>([]);
   const [startTs, setStartTs] = useState<number | null>(null);
@@ -183,8 +184,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
           spawnedCountRef.current += spawnTiles.length;
           if (firstArrivalTsRef.current == null) firstArrivalTsRef.current = arrivalTs;
         }
-        // optionally start a short burst
-        if (burstBeatsRef.current <= 0 && Math.random() < 0.1) {
+        // optionally start a short burst (disabled in performance mode)
+        if (!performanceMode && burstBeatsRef.current <= 0 && Math.random() < 0.1) {
           burstBeatsRef.current = 3;
         }
         if (burstBeatsRef.current > 0) burstBeatsRef.current -= 1;
@@ -287,7 +288,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         const ft = { id: nextFloatId.current++, lane: laneIdx, y: hitLineYLocal - 20, label };
         setFloatTexts(arr => [...arr, ft]);
         setTimeout(() => setFloatTexts(arr => arr.filter(x => x.id !== ft.id)), 500);
-        if (label === 'PERFECT') {
+        if (!performanceMode && label === 'PERFECT') {
           // spawn simple particles near the hit line in this lane
           const burst = Array.from({ length: 6 }).map(() => ({
             id: nextParticleId.current++,
@@ -382,8 +383,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
             {now - laneFlashRef.current[laneIdx] < 120 && (
               <View style={styles.laneFlash} />
             )}
-            {/* Near-hit highlight (time-based position) */}
-            {(() => {
+            {/* Near-hit highlight and lane quality disabled in performance mode */}
+            {!performanceMode && (() => {
               const anyNear = tiles.some(t => {
                 const elapsed = time.value - t.spawnTs;
                 const yNow = t.y + t.speed * elapsed;
@@ -391,8 +392,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
               });
               return anyNear ? <View style={styles.laneNear} /> : null;
             })()}
-            {/* Quality-based glow with decay */}
-            {(() => {
+            {!performanceMode && (() => {
               const age = now - laneQualityTsRef.current[laneIdx];
               const strength = laneQualityStrengthRef.current[laneIdx];
               const decay = Math.max(0, 1 - age / 220);
@@ -442,8 +442,10 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
           }}
           pointerEvents="auto"
         />
-        {/* BPM pulse overlay */}
-        <View pointerEvents="none" style={[styles.pulseOverlay, { opacity: pulseOpacity }]} />
+        {/* BPM pulse overlay disabled in performance mode */}
+        {!performanceMode && (
+          <View pointerEvents="none" style={[styles.pulseOverlay, { opacity: pulseOpacity }]} />
+        )}
       </View>
     </SafeAreaView>
   );
@@ -488,7 +490,7 @@ const styles = StyleSheet.create({
   topMeta: { color: '#cfd8ff' },
   pause: { color: colors.neonCyan, fontWeight: '800' },
   lane: { flex: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#151532', justifyContent: 'flex-start', overflow: 'hidden' },
-  tile: { position: 'absolute', height: 110, borderRadius: 12, backgroundColor: '#000000', opacity: 0.98, borderWidth: 2, borderColor: '#ffffff' },
+  tile: { position: 'absolute', height: 200, borderRadius: 8, backgroundColor: '#000000', opacity: 0.98, borderWidth: 2, borderColor: '#ffffff' },
   // stronger glow on tiles
   // @ts-ignore shadow props iOS/Android
   tileGlow: { shadowColor: colors.neonPurple, shadowRadius: 10, shadowOpacity: 0.35, shadowOffset: { width: 0, height: 0 } },

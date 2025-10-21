@@ -42,13 +42,14 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
 
   const diffConf = useMemo(() => currentSong?.difficulties[difficulty], [currentSong, difficulty]);
   const beatInterval = useMemo(() => currentSong ? 60 / currentSong.bpm : 0.5, [currentSong]);
-  // Spawn cadence: one tile every 2 beats for lower density
+  // Base spawn cadence: one tile every 2 beats; burst mode will temporarily spawn every beat
   const spawnInterval = useMemo(() => beatInterval * 2, [beatInterval]);
   const time = useSharedValue(0);
   // Pattern support: if currentSong has pattern, follow it deterministically; else random with optional chords
   const doubleChance = useRef(0.05); // 5% chance to spawn two simultaneous lanes when no pattern
   const patternIdxRef = useRef(0);
   const beatsSinceChordRef = useRef(10); // limit chord frequency
+  const burstBeatsRef = useRef(0); // when >0, spawn every beat to create quick sequences
 
   const endGame = useCallback(async () => {
     try { await audioRef.current?.stopAsync(); } catch {}
@@ -114,8 +115,10 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
 
     const tick = (t: number) => {
       if (isPaused) { rafRef.current = requestAnimationFrame(tick); return; }
+      // compute current interval (burst vs base)
+      const currentIntervalMs = (burstBeatsRef.current > 0 ? beatInterval : spawnInterval) * 1000;
       // spawn
-      if (t - lastSpawn >= spawnInterval * 1000) {
+      if (t - lastSpawn >= currentIntervalMs) {
         const startY = -100;
         const distancePx = hitLineY - startY;
         // Global ramp: start slower at 2.0 beats travel, gently decrease to minTravelBeats
@@ -163,6 +166,12 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
             ...spawnTiles.map(s => ({ id: nextTileId.current++, lane: s.lane, y: startY, speed, spawnTs, arrivalTs, holdMs: s.holdMs ?? 0, endTs: arrivalTs + (s.holdMs ?? 0) }))
           ]);
         }
+        // randomly start a short burst for quick sequences when not already in burst
+        if (burstBeatsRef.current <= 0 && Math.random() < 0.1) {
+          burstBeatsRef.current = 3; // 3 beats of faster taps
+        }
+        // decrement burst if active
+        if (burstBeatsRef.current > 0) burstBeatsRef.current -= 1;
         lastSpawn = t;
       }
       // advance shared time for Reanimated tiles
@@ -426,10 +435,11 @@ const styles = StyleSheet.create({
   topMeta: { color: '#cfd8ff' },
   pause: { color: colors.neonCyan, fontWeight: '800' },
   lane: { flex: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#151532', justifyContent: 'flex-start', overflow: 'hidden' },
-  tile: { position: 'absolute', height: 100, borderRadius: 12, backgroundColor: '#6a3cff', opacity: 0.9 },
+  tile: { position: 'absolute', height: 100, borderRadius: 12, backgroundColor: '#000000', opacity: 0.95 },
   // stronger glow on tiles
   // @ts-ignore shadow props iOS/Android
-  tileGlow: { shadowColor: '#9b5cff', shadowOpacity: 0.6, shadowRadius: 10, elevation: 6 },
+  tileGlow: { shadowColor: colors.neonPurple, shadowRadius: 10, shadowOpacity: 0.35, shadowOffset: { width: 0, height: 0 } },
+  holdTail: { backgroundColor: '#0a0a0a', borderRadius: 10, opacity: 0.9, marginHorizontal: 0, marginBottom: 6 },
   hitLine: { position: 'absolute', left: 0, right: 0, top: hitLineY, height: 4, backgroundColor: '#2a2140', zIndex: 1 },
   laneFlash: { ...StyleSheet.absoluteFillObject as any, backgroundColor: '#ffffff20' },
   laneNear: { ...StyleSheet.absoluteFillObject as any, backgroundColor: '#00e5ff10' },

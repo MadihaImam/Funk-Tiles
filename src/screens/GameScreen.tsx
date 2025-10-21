@@ -39,6 +39,9 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
   const laneQualityStrengthRef = useRef<number[]>([0, 0, 0, 0]); // 1..3, decays over time
   const heldLanesRef = useRef<Set<number>>(new Set());
   const holdingTileIdsRef = useRef<Set<number>>(new Set());
+  const spawnedCountRef = useRef<number>(0);
+  const playbackStartedRef = useRef<boolean>(false);
+  const firstArrivalTsRef = useRef<number | null>(null);
 
   const diffConf = useMemo(() => currentSong?.difficulties[difficulty], [currentSong, difficulty]);
   const beatInterval = useMemo(() => currentSong ? 60 / currentSong.bpm : 0.5, [currentSong]);
@@ -75,7 +78,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         audioRef.current = sound;
         // if audio starts later due to permissions, gameplay continues regardless
         sound.setOnPlaybackStatusUpdate((s: any) => {
-          if (s.didJustFinish && mounted) {
+          if (s?.isLoaded && s.positionMillis > 0) playbackStartedRef.current = true;
+          if (s?.didJustFinish && mounted && playbackStartedRef.current) {
             setEnded(true);
           }
         });
@@ -113,7 +117,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
     patternIdxRef.current = 0;
     beatsSinceChordRef.current = 10;
     burstBeatsRef.current = 0;
-    let lastSpawn = startTs;
+    // spawn immediately on first frame by backdating the last spawn
+    let lastSpawn = startTs - ((burstBeatsRef.current > 0 ? beatInterval : spawnInterval) * 1000);
     let lastTime = startTs;
     let lastUpdate = startTs;
 
@@ -158,7 +163,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
           } else {
             // either a tap or an occasional hold note (single-lane only)
             const ln = Math.floor(Math.random() * LANES);
-            const isHold = Math.random() < 0.05; // 5% chance of a hold note
+            const isHold = elapsedBeats >= 8 ? (Math.random() < 0.05) : false; // no holds in first 8 beats
             const holdMs = isHold ? (beatMs * (1.0 + Math.random() * 0.8)) : 0; // 1.0..1.8 beats
             spawnTiles.push({ lane: ln, holdMs });
             beatsSinceChordRef.current += 1;
@@ -169,6 +174,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
             ...prev,
             ...spawnTiles.map(s => ({ id: nextTileId.current++, lane: s.lane, y: startY, speed, spawnTs, arrivalTs, holdMs: s.holdMs ?? 0, endTs: arrivalTs + (s.holdMs ?? 0) }))
           ]);
+          spawnedCountRef.current += spawnTiles.length;
+          if (firstArrivalTsRef.current == null) firstArrivalTsRef.current = arrivalTs;
         }
         // randomly start a short burst for quick sequences when not already in burst
         if (burstBeatsRef.current <= 0 && Math.random() < 0.1) {
@@ -184,8 +191,7 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
       // strict fail: if any tile passes window or hold broken -> game over (slightly wider window)
       const goodWindowMs = 220;
       // small grace at the very start so first tiles are visible
-      const elapsedFromStart = startTs ? (t - startTs) : 0;
-      const failChecksActive = elapsedFromStart > 700;
+      const failChecksActive = firstArrivalTsRef.current != null ? (t > firstArrivalTsRef.current + 400) : false;
       const liveTiles = tilesRef.current;
       if (failChecksActive) for (const tile of liveTiles) {
         if (tile.holdMs > 0) {
@@ -226,8 +232,8 @@ export default function GameScreen({ navigation }: NativeStackScreenProps<RootSt
         }
       }
 
-      // end condition: if audio ended and no tiles left, navigate
-      if (ended && tilesRef.current.length === 0) {
+      // end condition: avoid premature end; require tiles spawned first
+      if (ended && spawnedCountRef.current > 0 && tilesRef.current.length === 0) {
         navigation.replace('GameOver');
         return;
       }
@@ -441,7 +447,7 @@ const styles = StyleSheet.create({
   topMeta: { color: '#cfd8ff' },
   pause: { color: colors.neonCyan, fontWeight: '800' },
   lane: { flex: 1, borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#151532', justifyContent: 'flex-start', overflow: 'hidden' },
-  tile: { position: 'absolute', height: 100, borderRadius: 12, backgroundColor: '#000000', opacity: 0.95 },
+  tile: { position: 'absolute', height: 110, borderRadius: 12, backgroundColor: '#000000', opacity: 0.98, borderWidth: 2, borderColor: '#ffffff' },
   // stronger glow on tiles
   // @ts-ignore shadow props iOS/Android
   tileGlow: { shadowColor: colors.neonPurple, shadowRadius: 10, shadowOpacity: 0.35, shadowOffset: { width: 0, height: 0 } },
